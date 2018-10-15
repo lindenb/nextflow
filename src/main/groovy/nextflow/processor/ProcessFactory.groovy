@@ -32,6 +32,7 @@ import nextflow.executor.NopeExecutor
 import nextflow.executor.NqsiiExecutor
 import nextflow.executor.PbsExecutor
 import nextflow.executor.SgeExecutor
+import nextflow.executor.CngExecutor
 import nextflow.executor.SlurmExecutor
 import nextflow.executor.SupportedScriptTypes
 import nextflow.k8s.K8sExecutor
@@ -67,7 +68,8 @@ class ProcessFactory {
             'condor': CondorExecutor,
             'k8s': K8sExecutor,
             'nqsii': NqsiiExecutor,
-            'awsbatch': AwsBatchExecutor
+            'awsbatch': AwsBatchExecutor,
+            'cng': CngExecutor
     ]
 
     private final Session session
