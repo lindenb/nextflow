@@ -17,8 +17,6 @@ import nextflow.processor.TaskRun
 @Slf4j
 class CngExecutor extends SlurmExecutor {
 
-    static private Pattern SUBMIT_REGEX = ~/Submitted batch job (\d+)/
-
     /**
      * Gets the directives to submit the specified task to the cluster for execution
      *
@@ -32,6 +30,13 @@ class CngExecutor extends SlurmExecutor {
         result << '-J' << getJobNameFor(task)
         result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
         result << '--no-requeue' << '' // note: directive need to be returned as pairs
+
+	result << '-s' << quote(task.study)
+	if( task.config.project ) {
+	result << '-A' << quote(task.config.project)
+	}
+	result << '-q' << quote(task.queuename)
+
 
         if( task.config.cpus > 1 ) {
             result << '-c' << task.config.cpus.toString()
