@@ -92,6 +92,11 @@ class SlurmExecutor extends AbstractGridExecutor {
 
     }
 
+
+    protected Pattern  getSubmitRegex() {
+    	return 	SUBMIT_REGEX;
+    }
+
     /**
      * Parse the string returned by the {@code sbatch} command and extract the job ID string
      *
@@ -102,7 +107,7 @@ class SlurmExecutor extends AbstractGridExecutor {
     def parseJobId(String text) {
 
         for( String line : text.readLines() ) {
-            def m = SUBMIT_REGEX.matcher(line)
+            def m = getSubmitRegex().matcher(line)
             if( m.find() ) {
                 return m.group(1).toString()
             }

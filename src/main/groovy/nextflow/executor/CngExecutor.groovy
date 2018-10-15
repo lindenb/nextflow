@@ -16,7 +16,7 @@ import nextflow.processor.TaskRun
 
 @Slf4j
 class CngExecutor extends SlurmExecutor {
-
+    static private Pattern CNG_SUBMIT_REGEX = ~/Submitted Batch Session (\d+)/
     /**
      * Gets the directives to submit the specified task to the cluster for execution
      *
@@ -25,35 +25,44 @@ class CngExecutor extends SlurmExecutor {
      * @return A {@link List} containing all directive tokens and values.
      */
     protected List<String> getDirectives(TaskRun task, List<String> result) {
-
-        result << '-D' << quote(task.workDir)
-        result << '-J' << getJobNameFor(task)
+	//-E \"extra_parameters...\" : extra parameters to pass directly to the underlying batch system
+        result << '-E' << quote('-D '+task.workDir+' --no-requeue')
+        result << '-r' << getJobNameFor(task)
         result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
         result << '--no-requeue' << '' // note: directive need to be returned as pairs
-
-	result << '-s' << quote(task.study)
+	
+	if( task.config.study ) {
+		result << '-s' << quote(task.config.study)
+		}
+	
 	if( task.config.project ) {
-	result << '-A' << quote(task.config.project)
-	}
-	result << '-q' << quote(task.queuename)
-
+		result << '-A' << quote(task.config.project)
+		}
+	if( task.config.queue ) {
+		result << '-q' << quote(task.queue)
+		}
+	else
+		{
+		result << '-q' << 'broadwell'
+		}
 
         if( task.config.cpus > 1 ) {
             result << '-c' << task.config.cpus.toString()
         }
 
         if( task.config.time ) {
-            result << '-t' << task.config.getTime().format('HH:mm:ss')
-        }
+            	result << '-T' << task.config.getTime().toSeconds()
+        	}
+        else
+        	{
+        	result << '-T' << '86400'
+        	}
 
         if( task.config.getMemory() ) {
-            result << '--mem' << task.config.getMemory().toMega().toString()
+            result << '-M' << task.config.getMemory().toMega().toString()
         }
 
-        // the requested partition (a.k.a queue) name
-        if( task.config.queue ) {
-            result << '-p' << (task.config.queue.toString())
-        }
+
 
         // -- at the end append the command script wrapped file name
         if( task.config.clusterOptions ) {
@@ -72,7 +81,11 @@ class CngExecutor extends SlurmExecutor {
         ['ccc_msub', scriptFile.getName()]
 
     }
-
+    
+   @Override
+    protected Pattern  getSubmitRegex() {
+    	return 	CNG_SUBMIT_REGEX;
+    }
 
     @Override
     protected List<String> getKillCommand() { ['ccc_mdel'] }
