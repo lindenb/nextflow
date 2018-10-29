@@ -26,20 +26,22 @@ class CngExecutor extends SlurmExecutor {
      */
     protected List<String> getDirectives(TaskRun task, List<String> result) {
 	//-E \"extra_parameters...\" : extra parameters to pass directly to the underlying batch system
-        result << '-E' << quote('-D '+task.workDir+' --no-requeue')
+        result << '-E' << ('-D ' + task.workDir + ' --no-requeue')
         result << '-r' << getJobNameFor(task)
-        result << '-o' << quote(task.workDir.resolve(TaskRun.CMD_LOG))     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
+        result << '-o' << task.workDir.resolve(TaskRun.CMD_LOG)     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
         result << '--no-requeue' << '' // note: directive need to be returned as pairs
 	
-	if( task.config.study ) {
+	
+	
+	if( task.config.containsKey('study') ) {
 		result << '-s' << quote(task.config.study)
 		}
 	
-	if( task.config.project ) {
-		result << '-A' << quote(task.config.project)
+	if( task.config.containsKey('project') ) {
+		result << '-A' << task.config.project
 		}
-	if( task.config.queue ) {
-		result << '-q' << quote(task.queue)
+	if( task.config.containsKey('queue') ) {
+		result << '-q' << task.config.queue
 		}
 	else
 		{
@@ -68,7 +70,7 @@ class CngExecutor extends SlurmExecutor {
         if( task.config.clusterOptions ) {
             result << task.config.clusterOptions.toString() << ''
         }
-
+	java.lang.System.err.println(result);
         return result
     }
 
@@ -78,7 +80,7 @@ class CngExecutor extends SlurmExecutor {
     @Override
     List<String> getSubmitCommandLine(TaskRun task, Path scriptFile ) {
 
-        ['ccc_msub', scriptFile.getName()]
+        ['ccc_mprun', scriptFile.getName()]
 
     }
     
