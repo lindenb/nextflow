@@ -26,8 +26,8 @@ class CngExecutor extends SlurmExecutor {
      */
     protected List<String> getDirectives(TaskRun task, List<String> result) {
 	//-E \"extra_parameters...\" : extra parameters to pass directly to the underlying batch system
-        result << '-E' << ('-D ' + task.workDir + ' --no-requeue')
-        result << '-r' << getJobNameFor(task)
+        result << '-E' << ('\"-D ' + task.workDir + ' --no-requeue\"')
+        result << '-r' << getJobNameFor(task).replaceAll("[^A-Za-z_0-9]+","_")
         result << '-o' << task.workDir.resolve(TaskRun.CMD_OUTFILE)
         result << '-e' << task.workDir.resolve(TaskRun.CMD_ERRFILE)
 	
@@ -91,7 +91,7 @@ class CngExecutor extends SlurmExecutor {
         if( task.config.clusterOptions ) {
             result << task.config.clusterOptions.toString() << ''
         }
-	java.lang.System.err.println(result);
+	
         return result
     }
 
@@ -112,5 +112,69 @@ class CngExecutor extends SlurmExecutor {
 
     @Override
     protected List<String> getKillCommand() { ['ccc_mdel'] }
+
+
+
+    @Override
+    protected List<String> queueStatusCommand(Object queue) {
+
+        final result = ['sacct','--noheader','-o','jobid%-14s,State%-20s']
+
+        //if( queue )
+        //    result << '-p' << queue.toString()
+
+        final user = System.getProperty('user.name')
+        if( user )
+            result << '-u' << user
+        else
+            log.debug "Cannot retrieve current user"
+
+        return result
+    }
+
+ 
+   private QueueStatus decodeQueueStatus(final String s)
+   	{
+   	if(s.equals("COMPLETED")) {
+   		return QueueStatus.DONE;
+   		}
+   	else if(s.equals("RUNNING")) {
+   		return QueueStatus.RUNNING;
+   		}
+   	else if(s.equals("FAILED")) {
+   		return QueueStatus.ERROR;
+   		}
+   	else if(s.equals("PENDING")) {
+   		return QueueStatus.PENDING;
+   		}
+   	else if(s.equals("CANCELLED")) {
+   		return QueueStatus.ERROR;
+   		}
+   	else
+   		{
+   		 log.debug "[CNG] invalid status identifier: `$s`"
+   		return QueueStatus.ERROR;
+   		}
+   	}
+
+
+    @Override
+    protected Map<String, QueueStatus> parseQueueStatus(String text) {
+
+        def result = [:]
+
+        text.eachLine { String line ->
+            def cols = line.split(/\s+/)
+            if( cols.size() == 2 ) {
+                result.put( cols[0], this.decodeQueueStatus(cols[1]) )
+            }
+            else {
+                log.debug "[CNG] invalid status line: `$line`"
+            }
+        }
+
+        return result
+    }
+
 
 }

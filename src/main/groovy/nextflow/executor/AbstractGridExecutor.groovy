@@ -204,6 +204,7 @@ abstract class AbstractGridExecutor extends Executor {
      */
     void killTask( def jobId )  {
         def cmd = killTaskCommand(jobId)
+
         def proc = new ProcessBuilder(cmd).redirectErrorStream(true).start()
         proc.waitForOrKill(10_000)
         def ret = proc.exitValue()
@@ -273,7 +274,7 @@ abstract class AbstractGridExecutor extends Executor {
                 return parseQueueStatus(result)
             }
             else {
-                log.warn "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status cannot be fetched > exit status: $exit\n$result"
+                log.warn "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status cannot be fetched using "+String.join(" ",cmd)+" > exit status: $exit\n$result"
                 return null
             }
 
