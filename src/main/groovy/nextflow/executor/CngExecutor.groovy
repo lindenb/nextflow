@@ -28,22 +28,43 @@ class CngExecutor extends SlurmExecutor {
 	//-E \"extra_parameters...\" : extra parameters to pass directly to the underlying batch system
         result << '-E' << ('-D ' + task.workDir + ' --no-requeue')
         result << '-r' << getJobNameFor(task)
-        result << '-o' << task.workDir.resolve(TaskRun.CMD_LOG)     // -o OUTFILE and no -e option => stdout and stderr merged to stdout/OUTFILE
-        result << '--no-requeue' << '' // note: directive need to be returned as pairs
+        result << '-o' << task.workDir.resolve(TaskRun.CMD_OUTFILE)
+        result << '-e' << task.workDir.resolve(TaskRun.CMD_ERRFILE)
 	
 	
-	
-	if( task.config.containsKey('study') ) {
-		result << '-s' << quote(task.config.study)
+	boolean got_config = false;
+	boolean got_project = false;
+	boolean got_queue = false;
+	if( task.config.clusterOptions ) {
+		final List<String> opts = task.config.getClusterOptionsAsList();
+		int i=0;
+		for(i=0;i+1 < opts.size();i+=2)
+			{
+			if(!got_config && opts.get(i).equals("study"))
+				{
+				result << '-s' <<  opts.get(i+1);
+				got_config = true;
+				}
+			else if(!got_project && opts.get(i).equals("project"))
+				{
+				result << '-A' <<  opts.get(i+1);
+				got_project = true;
+				}
+			else if(!got_queue && opts.get(i).equals("queue"))
+				{
+				result << '-q' <<  opts.get(i+1);
+				got_queue = true;
+				}
+			}
+		
 		}
 	
-	if( task.config.containsKey('project') ) {
-		result << '-A' << task.config.project
+	if(!got_project)
+		{
+		result << '-A' << "undefined"
 		}
-	if( task.config.containsKey('queue') ) {
-		result << '-q' << task.config.queue
-		}
-	else
+	
+	if(!got_queue)
 		{
 		result << '-q' << 'broadwell'
 		}
@@ -80,7 +101,7 @@ class CngExecutor extends SlurmExecutor {
     @Override
     List<String> getSubmitCommandLine(TaskRun task, Path scriptFile ) {
 
-        ['ccc_mprun', scriptFile.getName()]
+        ['ccc_msub', scriptFile.getName()]
 
     }
     
