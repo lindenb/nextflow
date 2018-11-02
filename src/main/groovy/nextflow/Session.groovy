@@ -1,26 +1,20 @@
 /*
- * Copyright (c) 2013-2018, Centre for Genomic Regulation (CRG).
- * Copyright (c) 2013-2018, Paolo Di Tommaso and the respective authors.
+ * Copyright 2013-2018, Centre for Genomic Regulation (CRG)
  *
- *   This file is part of 'Nextflow'.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *   Nextflow is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *   Nextflow is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with Nextflow.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package nextflow
-
-import static nextflow.Const.S3_UPLOADER_CLASS
 
 import java.lang.reflect.Method
 import java.nio.file.Files
@@ -55,6 +49,7 @@ import nextflow.script.ScriptBinding
 import nextflow.trace.GraphObserver
 import nextflow.trace.ReportObserver
 import nextflow.trace.StatsObserver
+import nextflow.trace.AnsiLogObserver
 import nextflow.trace.TimelineObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.trace.TraceObserver
@@ -68,6 +63,7 @@ import nextflow.util.HistoryFile
 import nextflow.util.NameGenerator
 import sun.misc.Signal
 import sun.misc.SignalHandler
+import static nextflow.Const.S3_UPLOADER_CLASS
 /**
  * Holds the information on the current execution
  *
@@ -202,6 +198,12 @@ class Session implements ISession {
     Throwable getError() { error }
 
     WorkflowStats getWorkflowStats() { workflowStats }
+
+    boolean ansiLog
+
+    private AnsiLogObserver ansiLogObserver
+
+    AnsiLogObserver getAnsiLogObserver() { ansiLogObserver }
 
     /**
      * Creates a new session with an 'empty' (default) configuration
@@ -345,8 +347,16 @@ class Session implements ISession {
         createTimelineObserver(result)
         createDagObserver(result)
         createWebLogObserver(result)
+        createAnsiLogObserver(result)
 
         return result
+    }
+
+    protected void createAnsiLogObserver(Collection<TraceObserver> result) {
+        if( ansiLog ) {
+            this.ansiLogObserver = new AnsiLogObserver()
+            result << ansiLogObserver
+        }
     }
 
     /**
