@@ -15,11 +15,14 @@
  */
 
 package nextflow.cli
+
+import spock.lang.Specification
+
 import java.nio.file.Files
 
 import com.beust.jcommander.DynamicParameter
 import com.beust.jcommander.Parameter
-import spock.lang.Specification
+import spock.util.environment.RestoreSystemProperties
 import test.OutputCapture
 /**
  *
@@ -272,13 +275,8 @@ class LauncherTest extends Specification {
 
     }
 
+    @RestoreSystemProperties
     def 'should setup proxy properties'() {
-
-        given:
-        def httpProxyHost =System.getProperty('http.proxyHost')
-        def httpProxyPort =System.getProperty('http.proxyPort')
-        def httpsProxyHost =System.getProperty('https.proxyHost')
-        def httpsProxyPort =System.getProperty('https.proxyPort')
 
         when:
         Launcher.setProxy('HTTP', [HTTP_PROXY: 'alpha.com:333'])
@@ -304,11 +302,26 @@ class LauncherTest extends Specification {
         System.getProperty('https.proxyHost') == 'zeta.com'
         System.getProperty('https.proxyPort') == '6646'
 
-        cleanup:
-        System.setProperty('http.proxyHost', httpProxyHost ?: '')
-        System.setProperty('http.proxyPort', httpProxyPort ?: '')
-        System.setProperty('https.proxyHost', httpsProxyHost ?: '')
-        System.setProperty('https.proxyPort', httpsProxyPort ?: '')
+    }
+
+    @RestoreSystemProperties
+    def 'should set no proxy property' () {
+
+        given:
+        System.properties.remove('http.nonProxyHosts')
+        
+        when:
+        Launcher.setNoProxy(ENV)
+        then:
+        System.getProperty('http.nonProxyHosts') == EXPECTED
+
+        where:
+        ENV                         | EXPECTED
+        [:]                         | null
+        [no_proxy: 'localhost' ]    | 'localhost'
+        [NO_PROXY: '127.0.0.1' ]    | '127.0.0.1'
+        [NO_PROXY:'localhost,127.0.0.1,.localdomain.com']  | 'localhost|127.0.0.1|.localdomain.com'
+
     }
 
     def 'should print Parameter and DynamicParameter annotation'() {

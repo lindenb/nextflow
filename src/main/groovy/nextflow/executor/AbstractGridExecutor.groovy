@@ -41,6 +41,8 @@ abstract class AbstractGridExecutor extends Executor {
 
     private final static List<String> INVALID_NAME_CHARS = [ " ", "/", ":", "@", "*", "?", "\\n", "\\t", "\\r" ]
 
+    private Map lastQueueStatus
+
     /**
      * Initialize the executor class
      */
@@ -137,7 +139,7 @@ abstract class AbstractGridExecutor extends Executor {
         // -- check for a custom `jobName` defined in the nextflow config file
         def customName = resolveCustomJobName(task)
         if( customName )
-            return customName
+            return sanitizeJobName(customName)
 
         // -- if not available fallback on the custom naming strategy
 
@@ -147,7 +149,11 @@ abstract class AbstractGridExecutor extends Executor {
             final ch = name[i]
             result.append( INVALID_NAME_CHARS.contains(ch) ? "_" : ch )
         }
-        result.toString()
+        return sanitizeJobName(result.toString())
+    }
+
+    protected String sanitizeJobName(String name) {
+        name.size() > 256 ? name.substring(0,256) : name
     }
 
     /**
@@ -208,7 +214,7 @@ abstract class AbstractGridExecutor extends Executor {
             return
 
         def m = """\
-                Unable to killing pending jobs
+                Unable to kill pending jobs
                 - cmd executed: ${cmd.join(' ')}
                 - exit status : $ret
                 - output      :
@@ -290,7 +296,7 @@ abstract class AbstractGridExecutor extends Executor {
     }
 
     @PackageScope
-    String dumpQueueStatus(Map<String,QueueStatus> statusMap) {
+    final String dumpQueueStatus(Map<String,QueueStatus> statusMap) {
         if( statusMap == null )
             return '  (null)'
         if( statusMap.isEmpty() )
@@ -301,6 +307,11 @@ abstract class AbstractGridExecutor extends Executor {
             result << '  job: ' << StringUtils.leftPad(k?.toString(),6) << ': ' << v?.toString() << '\n'
         }
         return result.toString()
+    }
+
+    @PackageScope
+    final String dumpQueueStatus() {
+        dumpQueueStatus(lastQueueStatus)
     }
 
     /**
@@ -323,7 +334,7 @@ abstract class AbstractGridExecutor extends Executor {
      * @return {@code true} if the job is in RUNNING or HOLD status, or even if it is temporarily unable
      *  to retrieve the job status for some
      */
-    public boolean checkActiveStatus( jobId, queue ) {
+    boolean checkActiveStatus( jobId, queue ) {
         assert jobId
 
         // -- fetch the queue status
@@ -332,6 +343,8 @@ abstract class AbstractGridExecutor extends Executor {
             log.trace "[${name.toUpperCase()}] queue ${queue?"($queue) ":''}status >\n" + dumpQueueStatus(result)
             return result
         }
+        // track the last status for debugging purpose
+        lastQueueStatus = status
 
         if( status == null ) { // no data is returned, so return true
             return true

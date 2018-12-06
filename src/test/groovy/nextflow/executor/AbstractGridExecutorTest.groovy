@@ -84,5 +84,31 @@ class AbstractGridExecutorTest extends Specification {
         exec.session.config = [ executor: [jobName: { task.name.replace(' ','_') }  ] ]
         then:
         exec.getJobNameFor(taskRun) == 'Hello_world'
+
+    }
+
+    def 'should cut long job name' () {
+
+        given:
+        def exec = [:] as AbstractGridExecutor
+        def task = Mock(TaskRun)
+
+        when:
+        def name = exec.getJobNameFor(task)
+        then:
+        1 * task.getName() >> { 'abcd' * 100 }
+        and:
+        name.size() == 256
+        name == ( 'nf-' + 'abcd' * 100 ).substring(0,256)
+    }
+
+    def 'should sanitize job name' () {
+        given:
+        def LONG = 'abcd' * 100
+        def exec = [:] as AbstractGridExecutor
+        
+        expect:
+        exec.sanitizeJobName('foo') == 'foo'
+        exec.sanitizeJobName(LONG) == LONG.substring(0,256)
     }
 }

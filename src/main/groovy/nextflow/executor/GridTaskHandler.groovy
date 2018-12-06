@@ -212,8 +212,11 @@ class GridTaskHandler extends TaskHandler {
 
             // -- if the job is active, this means that it is still running and thus the exit file cannot exist
             //    returns null to continue to wait
-            if( active )
+            if( active ) {
+                // make sure to reset exit time if the task is active -- see #927
+                exitTimestampMillis1 = 0
                 return null
+            }
 
             // -- if the job is not active, something is going wrong
             //  * before returning an error code make (due to NFS latency) the file status could be in a incoherent state
@@ -228,7 +231,7 @@ class GridTaskHandler extends TaskHandler {
             }
 
             def errMessage = []
-            errMessage << "Failed to get exist status for process ${this} -- exitStatusReadTimeoutMillis: $exitStatusReadTimeoutMillis; delta: $delta"
+            errMessage << "Failed to get exit status for process ${this} -- exitStatusReadTimeoutMillis: $exitStatusReadTimeoutMillis; delta: $delta"
             // -- dump current queue stats
             errMessage << "Current queue status:"
             errMessage << executor.dumpQueueStatus()?.indent('> ')

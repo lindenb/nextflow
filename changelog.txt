@@ -1,5 +1,14 @@
 NEXTFLOW CHANGE-LOG
 ===================
+18.11.0-edge - 12 Nov 2018
+- Added More duration and memory unit syntax sugar #921
+- Added NO_PROXY env variable should be honoured #864
+- Added keepHeader option to splitText operator #912
+- Fixed Invalid warning message for config selector #905
+- Fixed Queue status command fail on LSF version 8 #910
+- Fixed Use `bash` instead of `sh` to fetch queue status
+- Better report warning when grid status command fails [3ac8b972]
+- Fixed RejectedExecutionException on successive Console executions #906
 
 18.10.1 - 24 Oct 2018
 - Fixed test [011e8e23]
@@ -458,7 +467,7 @@ NEXTFLOW CHANGE-LOG
 - Added new CLI option `-params-file` to load parameters from a json/yaml file #208
 - Fixed SCM user name is not set accessing private repository #300
 - Fixed Infer singleton process outputs from inputs declaration #301
-- Fixed Use exist status 1 for all NF errors #304
+- Fixed Use exit status 1 for all NF errors #304
 - Fixed Invalid SGE job name as defined in `sge_types` #299
 - Added `skip` parameter to collectFile operator #306
 - Added experimental `fs` command

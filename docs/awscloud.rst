@@ -386,7 +386,7 @@ the necessary dependencies.
 
 The following snippet shows how to install AWS CLI with `Miniconda <https://conda.io/miniconda.html>`_::
 
-    sudo yum install -y wget
+    sudo yum install -y bzip2 wget
     wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
     bash Miniconda3-latest-Linux-x86_64.sh -b -f -p $HOME/miniconda
     $HOME/miniconda/bin/conda install -c conda-forge -y awscli
@@ -452,7 +452,7 @@ of hybrid workloads in which some jobs are execute in the local computer or loca
 some jobs are offloaded to AWS Batch service.
 
 To enable this feature use one or more :ref:`config-process-selectors` in your Nextflow configuration file to apply
-the AWS Batch `configuration <awscloud-batch-config>`_ only to a subset of processes in your workflow.
+the AWS Batch :ref:`configuration <awscloud-batch-config>` only to a subset of processes in your workflow.
 For example::
 
 
@@ -492,7 +492,7 @@ in which your Batch environment has been created.
 
 This may happen when Batch is unable to execute the process script. A common cause of this problem is that the
 Docker container image you have specified uses a non standard `entrypoint <https://docs.docker.com/engine/reference/builder/#entrypoint>`_
-which does not allow the execution of the BASH launcher script required by Nextflow to run the job.
+which does not allow the execution of the Bash launcher script required by Nextflow to run the job.
 
 This may also happen if the AWS CLI doesn't run correctly.
 

@@ -41,6 +41,7 @@ import nextflow.exception.IllegalConfigException
 import nextflow.exception.MissingLibraryException
 import nextflow.file.FileHelper
 import nextflow.processor.ErrorStrategy
+import nextflow.processor.ProcessConfig
 import nextflow.processor.TaskDispatcher
 import nextflow.processor.TaskFault
 import nextflow.processor.TaskHandler
@@ -138,6 +139,11 @@ class Session implements ISession {
      */
     List<Path> configFiles
 
+    /**
+     * Local path where script generated classes are saved
+     */
+    private Path classesDir
+
     private Path binDir
 
     private Map<String,Path> binEntries = [:]
@@ -198,6 +204,8 @@ class Session implements ISession {
     Throwable getError() { error }
 
     WorkflowStats getWorkflowStats() { workflowStats }
+
+    Path getClassesDir() { classesDir }
 
     boolean ansiLog
 
@@ -324,6 +332,9 @@ class Session implements ISession {
             // set the script name attribute
             this.setScriptName(scriptPath.name)
         }
+
+        // set the byte-code target directory
+        this.classesDir = FileHelper.createLocalDir()
 
         this.observers = createObservers()
         this.statsEnabled = observers.any { it.enableMetrics() }
@@ -611,6 +622,9 @@ class Session implements ISession {
 
             // -- shutdown s3 uploader
             shutdownS3Uploader()
+
+            // -- cleanup script classes dir
+            classesDir.deleteDir()
         }
         finally {
             // -- update the history file
@@ -792,7 +806,7 @@ class Session implements ISession {
             else if( key.startsWith('withName:') ) {
                 name = key.substring('withName:'.length())
             }
-            if( name && !isValidProcessName(name, processNames, result) )
+            if( name && !isValidProcessName(processNames, name, result) )
                 break
         }
 
@@ -802,21 +816,22 @@ class Session implements ISession {
     /**
      * Check that the specified name belongs to the list of existing process names
      *
-     * @param name The process name to check
+     * @param selector The process name to check
      * @param processNames The list of processes declared in the workflow script
      * @param errorMessage A list of strings used to return the error message to the caller
      * @return {@code true} if the name specified belongs to the list of process names or {@code false} otherwise
      */
-    protected boolean isValidProcessName(String name, Collection<String> processNames, List<String> errorMessage)  {
-        if( !processNames.contains(name) ) {
-            def suggestion = processNames.closest(name)
-            def message = "The config file defines settings for an unknown process: $name"
-            if( suggestion )
-                message += " -- Did you mean: ${suggestion.first()}?"
-            errorMessage << message.toString()
-            return false
-        }
-        return true
+    protected boolean isValidProcessName(Collection<String> processNames, String selector, List<String> errorMessage)  {
+        final matches = processNames.any { name -> ProcessConfig.matchesSelector(name, selector) }
+        if( matches )
+            return true
+
+        def suggestion = processNames.closest(selector)
+        def message = "There's no process matching config selector: $selector"
+        if( suggestion )
+            message += " -- Did you mean: ${suggestion.first()}?"
+        errorMessage << message.toString()
+        return false
     }
     /**
      * Register a shutdown hook to close services when the session terminates

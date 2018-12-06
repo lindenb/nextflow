@@ -61,7 +61,7 @@ allprojects {
     apply plugin: 'java'
     apply plugin: 'idea'
 
-    version = /18.11.0-SNAPSHOT/
+    version = /18.12.0-SNAPSHOT/
     group = 'io.nextflow'
 
     sourceCompatibility = 1.8
@@ -89,7 +89,7 @@ allprojects {
 
     dependencies {
         // test configuration
-        testCompile ("org.codehaus.groovy:groovy-test:2.5.3") { exclude group: 'org.codehaus.groovy' }
+        testCompile ("org.codehaus.groovy:groovy-test:2.5.4") { exclude group: 'org.codehaus.groovy' }
         testCompile ("cglib:cglib-nodep:2.2")
         testCompile ("org.objenesis:objenesis:2.1")
         testCompile ("org.spockframework:spock-core:1.2-groovy-2.5") { exclude group: 'org.codehaus.groovy' }
@@ -102,8 +102,8 @@ allprojects {
 
         // Documentation required libraries
         groovyDoc 'org.fusesource.jansi:jansi:1.11'
-        groovyDoc "org.codehaus.groovy:groovy-groovydoc:2.5.3"
-        groovyDoc "org.codehaus.groovy:groovy-ant:2.5.3"
+        groovyDoc "org.codehaus.groovy:groovy-groovydoc:2.5.4"
+        groovyDoc "org.codehaus.groovy:groovy-ant:2.5.4"
     }
 
     // this is required due to this IDEA bug
@@ -161,10 +161,10 @@ configurations {
 dependencies {
     compile(project(':nxf-commons'))
     compile(project(':nxf-httpfs'))
-    compile "org.codehaus.groovy:groovy:2.5.3"
-    compile "org.codehaus.groovy:groovy-nio:2.5.3"
-    compile "org.codehaus.groovy:groovy-json:2.5.3"
-    compile "org.codehaus.groovy:groovy-templates:2.5.3"
+    compile "org.codehaus.groovy:groovy:2.5.4"
+    compile "org.codehaus.groovy:groovy-nio:2.5.4"
+    compile "org.codehaus.groovy:groovy-json:2.5.4"
+    compile "org.codehaus.groovy:groovy-templates:2.5.4"
     compile "org.slf4j:jcl-over-slf4j:1.7.25"
     compile "org.slf4j:jul-to-slf4j:1.7.25"
     compile "org.slf4j:log4j-over-slf4j:1.7.25"
@@ -495,7 +495,7 @@ task deploy( type: Exec, dependsOn: [clean, pack, deployable.uploadArchives, mak
         def script = []
         script << "export AWS_ACCESS_KEY_ID=${System.env.NXF_AWS_ACCESS}"
         script << "export AWS_SECRET_ACCESS_KEY=${System.env.NXF_AWS_SECRET}"
-        script.addAll( files.collect { "aws s3 cp ${it} s3://www.nextflow.io/releases/v${version}/${it.name} ${s3CmdOpts}"})
+        script.addAll( files.collect { "aws s3 cp ${it} s3://www2.nextflow.io/releases/v${version}/${it.name} ${s3CmdOpts}"})
 
         temp.text = script.join('\n')
     }
@@ -569,6 +569,8 @@ task dockerPack(type: Exec, dependsOn: ['pack']) {
 
 /*
  * Tag and upload the release
+ * 
+ * https://github.com/aktau/github-release/
  */
 task release(type: Exec, dependsOn: [pack, dockerImage]) {
 
@@ -577,8 +579,9 @@ task release(type: Exec, dependsOn: [pack, dockerImage]) {
     def launcherSha256 = file('nextflow.sha256').absoluteFile
     def nextflowAllFile = file("$releaseDir/nextflow-${version}-all")
 
-    def snapshot = version ==~ /^.+(-RC\d+|\-SNAPSHOT)$/
-    def isLatest = !snapshot
+    def snapshot = version ==~ /^.+(-RC\d+|-SNAPSHOT)$/
+    def edge = version ==~ /^.+(-edge|-EDGE)$/
+    def isLatest = !snapshot && !edge
     def cmd =  """\
     # tag the release
     git push || exit \$?
@@ -589,15 +592,26 @@ task release(type: Exec, dependsOn: [pack, dockerImage]) {
     github-release upload -u nextflow-io -r nextflow -t v$version --file ${nextflowAllFile} --name ${nextflowAllFile.name}
     """.stripIndent()
 
-    if( isLatest )
+    if( edge )
         cmd += """
         # publish the script as the latest
         export AWS_ACCESS_KEY_ID=${System.env.NXF_AWS_ACCESS}
         export AWS_SECRET_ACCESS_KEY=${System.env.NXF_AWS_SECRET}
-        aws s3 cp $launcherFile s3://www.nextflow.io/releases/latest/nextflow $s3CmdOpts
-        aws s3 cp $launcherSha1 s3://www.nextflow.io/releases/latest/nextflow.sha1 $s3CmdOpts
-        aws s3 cp $launcherSha256 s3://www.nextflow.io/releases/latest/nextflow.sha256 $s3CmdOpts
-        aws s3 cp $launcherSha256 s3://www.nextflow.io/releases/latest/nextflow.md5 $s3CmdOpts
+        aws s3 cp $launcherFile s3://www2.nextflow.io/releases/edge/nextflow $s3CmdOpts
+        aws s3 cp $launcherSha1 s3://www2.nextflow.io/releases/edge/nextflow.sha1 $s3CmdOpts
+        aws s3 cp $launcherSha256 s3://www2.nextflow.io/releases/edge/nextflow.sha256 $s3CmdOpts
+        aws s3 cp $launcherSha256 s3://www2.nextflow.io/releases/edge/nextflow.md5 $s3CmdOpts
+        """.stripIndent()
+        
+    else if( isLatest )
+        cmd += """
+        # publish the script as the latest
+        export AWS_ACCESS_KEY_ID=${System.env.NXF_AWS_ACCESS}
+        export AWS_SECRET_ACCESS_KEY=${System.env.NXF_AWS_SECRET}
+        aws s3 cp $launcherFile s3://www2.nextflow.io/releases/latest/nextflow $s3CmdOpts
+        aws s3 cp $launcherSha1 s3://www2.nextflow.io/releases/latest/nextflow.sha1 $s3CmdOpts
+        aws s3 cp $launcherSha256 s3://www2.nextflow.io/releases/latest/nextflow.sha256 $s3CmdOpts
+        aws s3 cp $launcherSha256 s3://www2.nextflow.io/releases/latest/nextflow.md5 $s3CmdOpts
         """.stripIndent()
 
     def temp = File.createTempFile('upload',null)

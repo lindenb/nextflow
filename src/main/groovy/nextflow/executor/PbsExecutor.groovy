@@ -77,13 +77,13 @@ class PbsExecutor extends AbstractGridExecutor {
     }
 
     @Override
-    String getJobNameFor( TaskRun task ) {
-        def result = super.getJobNameFor(task)
+    String sanitizeJobName( String name ) {
         // some implementations do not allow parenthesis in the job name -- see #271
-        result = result.replace('(','').replace(')','')
+        name = name.replace('(','').replace(')','')
         // PBS does not allow more than 15 characters for the job name string
-        result && result.size()>15 ? result.substring(0,15) : result
+        name.size()>15 ? name.substring(0,15) : name
     }
+
     /**
      * The command line to submit this job
      *
@@ -134,6 +134,10 @@ class PbsExecutor extends AbstractGridExecutor {
             'S': QueueStatus.HOLD
     ]
 
+    protected QueueStatus decode(String status) {
+        DECODE_STATUS.get(status)
+    }
+
     @Override
     protected Map<String, QueueStatus> parseQueueStatus(String text) {
 
@@ -150,7 +154,7 @@ class PbsExecutor extends AbstractGridExecutor {
             else if( id ) {
                 status = fetchValue(JOB_STATUS, line)
             }
-            result.put( id, DECODE_STATUS[status] ?: AbstractGridExecutor.QueueStatus.UNKNOWN )
+            result.put( id, decode(status) ?: QueueStatus.UNKNOWN )
         }
 
         return result
