@@ -5,8 +5,6 @@ the `pl_cng` branch is a fork of nextflow running with the cea/ccrt infrastructu
 # Compiling
 
 ```
-$ git clone https://github.com/lindenb/nextflow
-$ cd nextflow
 $ git checkout pl_cng
 $ make
 ```
