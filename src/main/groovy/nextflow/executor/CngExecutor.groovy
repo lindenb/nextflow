@@ -20,7 +20,7 @@ class CngExecutor extends SlurmExecutor {
     
     
     String getEnvOrDefault(String key,String defaultValue) {
-    	return System.getEnv(key,defaultValue);
+    	return System.getProperty(key,defaultValue);
     	}
     String getRequiredEnv(String key) {
     	String s= getEnvOrDefault(key,null);
@@ -120,6 +120,7 @@ class CngExecutor extends SlurmExecutor {
  
    private QueueStatus decodeQueueStatus(final String s)
    	{
+   	// QueueStatus.HOLD, ?
    	if(s.equals("COMPLETED")) {
    		return QueueStatus.DONE;
    		}
@@ -132,12 +133,12 @@ class CngExecutor extends SlurmExecutor {
    	else if(s.equals("PENDING")) {
    		return QueueStatus.PENDING;
    		}
-   	else if(s.equals("CANCELLED")) {
+   	else if(s.contains("CANCELLED")) {
    		return QueueStatus.ERROR;
    		}
    	else
    		{
-   		 log.error "[CNG Executor] invalid status identifier for Status: `$s`"
+   		 log.error "[CNG Executor] invalid status identifier for Status: `$s` . Interpretted as ERROR. "
    		return QueueStatus.ERROR;
    		}
    	}
@@ -152,9 +153,14 @@ class CngExecutor extends SlurmExecutor {
             def cols = line.split(/\s+/)
             if( cols.size() == 2 ) {
                 result.put( cols[0], this.decodeQueueStatus(cols[1]) )
-            }
+            	}
+            else if(line.contains("CANCELLED"))
+            	{
+            	result.put( cols[0],  QueueStatus.ERROR )
+            	}
             else {
-                log.error "[CNG Executor] invalid status line: `$line`"
+                log.debug "[CNG Executor] invalid status line: `$line`. Interpreted as ERROR. "
+                result.put( cols[0], QueueStatus.ERROR )
             }
         }
 
