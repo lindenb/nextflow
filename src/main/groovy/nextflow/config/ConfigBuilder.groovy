@@ -427,13 +427,12 @@ class ConfigBuilder {
     }
 
     private String normalizeResumeId( String uniqueId ) {
-        log.debug("normalizeResumeId="+uniqueId);
-        if( !uniqueId ) return null;
+        if( !uniqueId )
+            return null
 
         if( uniqueId == 'last' || uniqueId == 'true' ) {
-		log.debug("HistoryFile.DEFAULT.getLast "+HistoryFile.DEFAULT.getLast());
             uniqueId = HistoryFile.DEFAULT.getLast()?.sessionId
-		log.debug("uniqueId = "+uniqueId);
+
             if( !uniqueId ) {
                 log.warn "It appears you have never run this project before -- Option `-resume` is ignored"
             }

@@ -121,9 +121,6 @@ class Launcher {
     @PackageScope
     Launcher parseMainArgs(String... args) {
         this.cliString = System.getenv('NXF_CLI')
-        if(this.cliString==null) this.cliString="nextflow";
-
-	log.debug("Launcher: cliString "+this.cliString );
         this.colsString = System.getenv('COLUMNS')
 
         def cols = getColumns()

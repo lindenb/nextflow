@@ -51,36 +51,26 @@ class HistoryFile extends File {
 
     HistoryFile(File file) {
         super(file.toString())
-	log.info("HISTORY file is "+file);
     }
 
     HistoryFile(Path file) {
         super(file.toString())
-	log.info("HISTORY file is "+file);
     }
 
     void write( String name, UUID key, String revisionId, args, Date date = null ) {
-	log.warn("BEGIN HISTORY:write")
         assert key
         assert args != null
 
         withFileLock {
-	    try {
             def timestamp = date ?: new Date()
             def value = args instanceof Collection ? args.join(' ') : args
-            def rec = new Record(timestamp: timestamp, runName: name, revisionId: revisionId, sessionId: key, command: value).toString() 
-	    log.debug("History append \""+rec+"\"");
-	    this << rec << '\n'
-	    } catch(Throwable err) {
-             log.error("cannot write ",err);
-	    }
+            this << new Record(timestamp: timestamp, runName: name, revisionId: revisionId, sessionId: key, command: value).toString() << '\n'
         }
-	log.warn("END HISTORY:write")
     }
 
     void update( String name, boolean success, Date when = null) {
         assert name
-	log.warn(" updating $this "+name+ " success="+success+" "+when);	
+
         try {
             withFileLock { update0(name, success ? 'OK' : 'ERR', when) }
         }
@@ -90,52 +80,37 @@ class HistoryFile extends File {
     }
 
     private void update0( String name, String status, Date when ) {
-	log.debug("updating0 "+this.getPath()+" : name="+name+" status:"+status +" when:"+when);
 
         long ts = when?.time ?: System.currentTimeMillis()
         def newHistory = new StringBuilder()
 
         this.readLines().each { line ->
-	    log.debug("update0 : reading line "+line);
             try {
                 def current = line ? Record.parse(line) : null
-		log.debug("update0 current : "+current +" \n");
                 if( current?.runName == name ) {
                     current.duration = new Duration( ts - current.timestamp.time )
                     current.status = status
-		    log.debug("update0 current "+getPath()+" append "+current +"\n");
-
                     newHistory << current.toString() << '\n'
                 }
                 else {
-		    log.debug("newHistory << "+line);
                     newHistory << line << '\n'
                 }
             }
-            catch( Exception e ) {
-		e.printStackTrace();
+            catch( IllegalArgumentException e ) {
                 log.warn("Can't read history file: $this", e)
             }
         }
 
         // rewrite the history content
-	log.debug("udpate0: "+getPath()+" writing new History \""+ newHistory.toString()+"\"");
-        this.setTexte(newHistory.toString())
-	log.debug("updating0 END ");
+        this.setText(newHistory.toString())
     }
 
     Record getLast() {
-	log.warn("History.getLast exists:" + getPath() + "  " + exists());
-	log.warn("History.getLast empty: " + getPath() +  "  "+ empty());
-
         if( !exists() || empty() ) {
-		log.debug("getLast return null ");
             return null
         }
-	def lines = readLines();
-	log.debug("lines:"+lines);
-        def line = lines[-1]
-	log.debug("line[-1]:"+line);
+
+        def line = readLines()[-1]
         try {
             line ? Record.parse(line) : null
         }
@@ -148,7 +123,6 @@ class HistoryFile extends File {
     void print() {
 
         if( empty() ) {
-		log.debug("nothing to print because empty " + getPath());
             System.err.println '(no history available)'
         }
         else {
@@ -351,18 +325,6 @@ class HistoryFile extends File {
         }
     }
 
-    void setTexte(String s) {
-	log.info("BEGIN set text for "+getPath()+" to "+s);
-	try {
-		this.setText(s);
-	} catch(Throwable err)
-		{
-		log.error("Cannot set text for "+getPath(),err);
-		}
-
-	log.info("END set text for "+getPath()+" to "+s);
-	}
-
     void deleteEntry0(Record entry) {
 
         def newHistory = new StringBuilder()
@@ -380,12 +342,9 @@ class HistoryFile extends File {
         }
 
         // rewrite the history content
-	log.debug("deleteEntry0: "+getPath()+" "+newHistory.toString());
-        this.setTexte(newHistory.toString())
+        this.setText(newHistory.toString())
 
     }
-
-
 
     @EqualsAndHashCode(includes = 'runName,sessionId')
     static class Record {
@@ -454,12 +413,11 @@ class HistoryFile extends File {
      * @return The value returned by the action closure
      */
     private withFileLock(Closure action) {
-	log.debug("withFileLock:with fileLock begin");
+
         def rnd = new Random()
         long ts = System.currentTimeMillis()
         String parent = this.parent ?: new File('.').absolutePath
         def file = new File(parent, "${this.name}.lock".toString())
-	log.debug("withFileLock writing to "+file);
         def fos = new FileOutputStream(file)
         try {
             Throwable error
@@ -467,36 +425,27 @@ class HistoryFile extends File {
 
             try {
                 while( true ) {
-		    log.debug("trying to lock on "+file);
                     lock = fos.getChannel().tryLock()
                     if( lock ) break
                     if( System.currentTimeMillis() - ts < 1_000 )
                         sleep rnd.nextInt(75)
                     else {
                         error = new IllegalStateException("Can't lock file: ${this.absolutePath} -- Nextflow needs to run in a file system that supports file locks")
-                        log.debug("withFileLock will throw error "+error);
-			break
+                        break
                     }
                 }
                 if( lock ) {
-		    log.debug("withFileLock:OK locked calling action : ");
-                    def ret = action.call()
-		    log.debug("withFileLock:OK locked calling action call returned "+ret);
-		    return ret;
+                    return action.call()
                 }
             }
             catch( Exception e ) {
-		log.info("withFileLock : cannot withFileLock " + getPath() );
                 return action.call()
             }
             finally {
                 if( lock?.isValid() ) lock.release()
             }
 
-            if( error ) {
-		log.debug("throwing "+error);
-		throw error
-		}
+            if( error ) throw error
         }
         finally {
             fos.closeQuietly()

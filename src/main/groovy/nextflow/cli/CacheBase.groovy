@@ -22,7 +22,7 @@ import groovy.transform.PackageScope
 import nextflow.CacheDB
 import nextflow.exception.AbortOperationException
 import nextflow.util.HistoryFile
-import groovy.util.logging.Slf4j
+
 import static nextflow.util.HistoryFile.Record
 
 /**
@@ -30,7 +30,6 @@ import static nextflow.util.HistoryFile.Record
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-@Slf4j
 @CompileStatic
 trait CacheBase {
 
@@ -49,12 +48,9 @@ trait CacheBase {
     abstract List<String> getArgs()
 
     void init() {
-	System.err.println("init CacheBase");
-        if( !history ) {
-	    System.err.println("x1 basePath "+basePath);
-            history = !basePath ? HistoryFile.DEFAULT : new HistoryFile(basePath.resolve(HistoryFile.FILE_NAME))
-	    System.err.println("x2 basePath "+basePath);
 
+        if( !history ) {
+            history = !basePath ? HistoryFile.DEFAULT : new HistoryFile(basePath.resolve(HistoryFile.FILE_NAME))
         }
 
         if( !history.exists() || history.empty() )

@@ -629,11 +629,8 @@ class Session implements ISession {
         finally {
             // -- update the history file
             if( HistoryFile.DEFAULT.exists() ) {
-		log.info("updating "+ HistoryFile.DEFAULT );
                 HistoryFile.DEFAULT.update(runName,isSuccess())
-            } else {
-		log.info("history file doesn't exists so I don't update ("+ HistoryFile.DEFAULT +")");
-		}
+            }
             log.trace "Session destroyed"
         }
     }
