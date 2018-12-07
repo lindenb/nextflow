@@ -26,7 +26,7 @@ Those variables are set on the java command line using `-D` . e.g: `-Dccc.queue=
 
   * **ccc.queue** : the queue (default: `broadwell`)
   * **ccc.project** : the project (option `-A` of ccc_msub). REQUIRED
-  * **ccc.study** : the study (option `-s` of ccc_msub). REQUIRED
+  * **ccc.study** : the study (option `-s` of ccc_msub).
   * **ccc.time** : the time (option `-T` of ccc_msub). Overrided the by value of `task.config.getTime().toSeconds()` otherwise use the default value `86400`.
 
 # Example
