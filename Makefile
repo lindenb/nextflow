@@ -27,6 +27,9 @@ else
 mm = 
 endif 
 
+ccrt: clean pack
+	@echo  -n "Done. Executable java/ccrt is :" && find build/libs/ -type f -name "nextflow*all.jar"
+
 compile:
 	./gradlew compile exportClasspath
 	@echo "DONE `date`"

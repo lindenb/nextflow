@@ -12,11 +12,27 @@ import java.util.regex.Pattern
 
 import groovy.util.logging.Slf4j
 import nextflow.processor.TaskRun
-
+import nextflow.exception.ProcessSubmitException
 
 @Slf4j
 class CngExecutor extends SlurmExecutor {
     static private Pattern CNG_SUBMIT_REGEX = ~/Submitted Batch Session (\d+)/
+    
+    
+    String getEnvOrDefault(String key,String defaultValue) {
+    	return System.getEnv(key,defaultValue);
+    	}
+    String getRequiredEnv(String key) {
+    	String s= getEnvOrDefault(key,null);
+    	if( s == null || s.trim().isEmpty()) {
+    		String message = "Failed to submit ccrt process because java property '"+key+"' is not defined or is empty. "+
+	    		"You can set if on the command line with -D"+key+"=xxxx  .";
+	    	log.error(message);
+	    	throw new ProcessSubmitException(message);
+    		}
+    	return s;
+    	}
+    	
     /**
      * Gets the directives to submit the specified task to the cluster for execution
      *
@@ -31,43 +47,12 @@ class CngExecutor extends SlurmExecutor {
         result << '-o' << task.workDir.resolve(TaskRun.CMD_OUTFILE)
         result << '-e' << task.workDir.resolve(TaskRun.CMD_ERRFILE)
 	
+	result << '-A' << getRequiredEnv("ccc.project")
 	
-	boolean got_config = false;
-	boolean got_project = false;
-	boolean got_queue = false;
-	if( task.config.clusterOptions ) {
-		final List<String> opts = task.config.getClusterOptionsAsList();
-		int i=0;
-		for(i=0;i+1 < opts.size();i+=2)
-			{
-			if(!got_config && opts.get(i).equals("study"))
-				{
-				result << '-s' <<  opts.get(i+1);
-				got_config = true;
-				}
-			else if(!got_project && opts.get(i).equals("project"))
-				{
-				result << '-A' <<  opts.get(i+1);
-				got_project = true;
-				}
-			else if(!got_queue && opts.get(i).equals("queue"))
-				{
-				result << '-q' <<  opts.get(i+1);
-				got_queue = true;
-				}
-			}
-		
+	if(getEnvOrDefault("ccc.study",null)!=null) {
+		result << '-s' << getEnvOrDefault("ccc.study",null);
 		}
-	
-	if(!got_project)
-		{
-		result << '-A' << "undefined"
-		}
-	
-	if(!got_queue)
-		{
-		result << '-q' << 'broadwell'
-		}
+	result << '-q' << getEnvOrDefault("ccc.queue","broadwell");
 
         if( task.config.cpus > 1 ) {
             result << '-c' << task.config.cpus.toString()
@@ -78,7 +63,7 @@ class CngExecutor extends SlurmExecutor {
         	}
         else
         	{
-        	result << '-T' << '86400'
+        	result << '-T' <<  getEnvOrDefault("ccc.time","86400")
         	}
 
         if( task.config.getMemory() ) {
@@ -127,7 +112,7 @@ class CngExecutor extends SlurmExecutor {
         if( user )
             result << '-u' << user
         else
-            log.debug "Cannot retrieve current user"
+            log.debug "[CNGExecutor]:queueStatusCommand Cannot retrieve current user"
 
         return result
     }
@@ -152,7 +137,7 @@ class CngExecutor extends SlurmExecutor {
    		}
    	else
    		{
-   		 log.debug "[CNG] invalid status identifier: `$s`"
+   		 log.error "[CNG Executor] invalid status identifier for Status: `$s`"
    		return QueueStatus.ERROR;
    		}
    	}
@@ -169,7 +154,7 @@ class CngExecutor extends SlurmExecutor {
                 result.put( cols[0], this.decodeQueueStatus(cols[1]) )
             }
             else {
-                log.debug "[CNG] invalid status line: `$line`"
+                log.error "[CNG Executor] invalid status line: `$line`"
             }
         }
 

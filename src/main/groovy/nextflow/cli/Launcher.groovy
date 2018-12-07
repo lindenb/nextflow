@@ -123,6 +123,9 @@ class Launcher {
         this.cliString = System.getenv('NXF_CLI')
         this.colsString = System.getenv('COLUMNS')
 
+	if(this.cliString==null) this.cliString = "nextflow-ccrt"
+
+
         def cols = getColumns()
         if( cols )
             jcommander.setColumnSize(cols)

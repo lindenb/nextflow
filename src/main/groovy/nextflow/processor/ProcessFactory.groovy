@@ -67,7 +67,10 @@ class ProcessFactory {
             'k8s': K8sExecutor,
             'nqsii': NqsiiExecutor,
             'awsbatch': AwsBatchExecutor,
-            'cng': CngExecutor
+            'cng': CngExecutor,
+            'ccc': CngExecutor,
+            'ccrt': CngExecutor,
+            'cea': CngExecutor
     ]
 
     private final Session session
