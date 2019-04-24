@@ -1,6 +1,6 @@
 #!/usr/bin/env nextflow
 /*
- * Copyright 2013-2018, Centre for Genomic Regulation (CRG)
+ * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@
  */
  
 process foo {
-  output: file 'missing.txt' optional true into result
+  output: 
+  file 'missing.txt' optional true into result
 
   '''
   echo miao
@@ -24,9 +25,10 @@ process foo {
 }
 
 process bar {
-	input: file x from result
+  input: 
+  file x from result
 
-	'''
-	echo bau
-	'''
+  '''
+  echo bau
+  '''
 }

@@ -1,5 +1,5 @@
 #
-#  Copyright 2013-2018, Centre for Genomic Regulation (CRG)
+#  Copyright 2013-2019, Centre for Genomic Regulation (CRG)
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -35,6 +35,10 @@ compile:
 	@echo "DONE `date`"
 
 clean:
+	rm -rf .nextflow*
+	rm -rf work 
+	rm -rf modules/nextflow/.nextflow*
+	rm -rf modules/nextflow/work
 	./gradlew clean
 
 assemble:
@@ -62,6 +66,9 @@ else
 	./gradlew ${mm}test --tests ${class}
 endif
 
+smoke:
+	NXF_SMOKE=1 ./gradlew :nextflow:test
+
 pack:
 	./gradlew packAll
 
@@ -69,7 +76,7 @@ deploy:
 	./gradlew deploy
 
 close:
-	./gradlew closeRepository promoteRepository
+	./gradlew closeAndReleaseRepository
 	
 release:
 	./gradlew release	

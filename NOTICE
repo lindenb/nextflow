@@ -1,6 +1,6 @@
 NEXTFLOW
 
-Copyright 2013-2018, Centre for Genomic Regulation (CRG)
+Copyright 2013-2019, Centre for Genomic Regulation (CRG)
 
 
 This software includes source code and libraries developed by:
@@ -15,6 +15,10 @@ This software includes source code and libraries developed by:
     Licensed under Apache License, Version 2.0
 
     University of Tübingen, Quantitative Biology Center (QBiC)
+    Licensed under Apache License, Version 2.0
+
+    WuxiNextcode
+    Copyright 2018, WuxiNextcode
     Licensed under Apache License, Version 2.0
 
     Apache Commons Lang

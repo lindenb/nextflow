@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2018, Centre for Genomic Regulation (CRG)
+ * Copyright 2013-2019, Centre for Genomic Regulation (CRG)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,17 @@
  * limitations under the License.
  */
 
+rootProject.name = 'nextflow-prj'
+
 include 'my-capsule'
-include 'nxf-commons'
-include 'nxf-console'
-include 'nxf-ignite'
-include 'nxf-httpfs'
-include 'nxf-ga4gh'
+include 'nextflow'
+include 'nf-commons'
+include 'nf-console'
+include 'nf-ignite'
+include 'nf-httpfs'
+include 'nf-ga4gh'
+include 'nf-google'
 
 rootProject.children.each { prj ->
-    prj.projectDir = new File("$rootDir/subprojects/$prj.name")
+    prj.projectDir = new File("$rootDir/modules/$prj.name")
 }

@@ -17,11 +17,6 @@ export TRAVIS_PULL_REQUEST=${TRAVIS_PULL_REQUEST:=false}
   bash run.sh
 )
 
-if [[ $TRAVIS_PULL_REQUEST == true ]]; then
-echo Skipping tests requiring secret vars
-exit 0
-fi 
-
 #
 # Hello 
 #
@@ -31,6 +26,11 @@ git clone https://github.com/nextflow-io/hello
   $NXF_CMD run .
   $NXF_CMD run . -resume
 )
+
+if [[ $TRAVIS_PULL_REQUEST != false ]]; then
+echo Skipping tests requiring secret vars
+exit 0
+fi
 
 #
 # AMPA-NF
