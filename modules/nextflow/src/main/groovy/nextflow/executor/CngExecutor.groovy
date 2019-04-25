@@ -8,6 +8,8 @@
 
 package nextflow.executor
 import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.Files
 import java.util.regex.Pattern
 
 import groovy.util.logging.Slf4j
@@ -44,8 +46,22 @@ class CngExecutor extends SlurmExecutor {
 	//-E \"extra_parameters...\" : extra parameters to pass directly to the underlying batch system
         result << '-E' << ('\"-D ' + task.workDir + ' --no-requeue\"')
         result << '-r' << getJobNameFor(task).replaceAll("[^A-Za-z_0-9]+","_")
-        result << '-o' << task.workDir.resolve(TaskRun.CMD_OUTFILE)
-        result << '-e' << task.workDir.resolve(TaskRun.CMD_ERRFILE)
+
+        if(!getEnvOrDefault("ccc.logdir","").isEmpty())
+		{
+                Path dir0 = Paths.get(System.getProperty("ccc.logdir",""));
+		Path dir1 = dir0.resolve(task.workDir.getParent().getFileName().toString());
+		if(!Files.exists(dir1)) Files.createDirectory(dir1);
+		Path dir2 = dir1.resolve(task.workDir.getFileName().toString());
+                if(!Files.exists(dir2)) Files.createDirectory(dir2);
+		result << '-o' <<  dir2.resolve(TaskRun.CMD_OUTFILE)
+		result << '-e' <<  dir2.resolve(TaskRun.CMD_ERRFILE)
+		}
+         else
+		{
+	        result << '-o' << task.workDir.resolve(TaskRun.CMD_OUTFILE)
+        	result << '-e' << task.workDir.resolve(TaskRun.CMD_ERRFILE)
+		}
 	
 	result << '-A' << getRequiredEnv("ccc.project")
 	
