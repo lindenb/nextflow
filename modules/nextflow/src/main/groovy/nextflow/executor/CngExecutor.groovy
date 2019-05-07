@@ -158,6 +158,9 @@ class CngExecutor extends SlurmExecutor {
 	else if(s.equals("OUT_OF_MEMORY")) {
    		return QueueStatus.ERROR;
    		}
+	else if(s.equals("SUSPENDED")) {
+   		return QueueStatus.HOLD;
+   		}
    	else
    		{
    		 log.error "[CNG Executor] invalid status identifier for Status: `$s` . Interpretted as ERROR. "
