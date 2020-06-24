@@ -105,8 +105,11 @@ nxf_mem_watch() {
         fi
         ## wait for termination message
         read -t $timeout -r DONE || true
-        ## make sure to not enter an infite loop
+        ## make sure to not enter an infinite loop
         [[ $DONE ]] && break
+        ## this likely could be removed since the process is killed
+        ## by the trap on error condition introduced by the patch for #1344
+        ## keeping as extra check to prevent hanging
         if [ ! -e /proc/$pid ]; then
             [ ! $STOP ] && STOP=$(nxf_date)
             [ $(($(nxf_date)-STOP)) -gt 10000 ] && break
@@ -149,8 +152,16 @@ nxf_trace_mac() {
     nxf_write_trace
 }
 
+nxf_fd() {
+    ## Find first avail file descriptor starting from 11
+    local FD=11
+    while [ -e /proc/$$/fd/$FD ]; do FD=$((FD+1)); done
+    echo $FD
+}
+
 nxf_trace_linux() {
     local pid=$$
+    command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to collect task metrics cannot be found"; exit 1; }
     ## see
     ##  https://github.com/Leo-G/DevopsWiki/wiki/How-Linux-CPU-Usage-Time-and-Percentage-is-calculated
     ##  https://stackoverflow.com/questions/27508531/calculate-cpu-per-process/27514562##27514562
@@ -160,15 +171,16 @@ nxf_trace_linux() {
     local cpu_time0=$(2> /dev/null < /proc/$pid/stat awk '{printf "%.0f", ($16+$17)*10 }' || echo -n 'X')
     local io_stat0=($(2> /dev/null < /proc/$pid/io sed 's/^.*:\s*//' | head -n 6 | tr '\n' ' ' || echo -n '0 0 0 0 0 0'))
     local start_millis=$(nxf_date)
-
-    command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to collect task metrics cannot be found"; exit 1; }
-
+    ## capture error and kill mem watcher
+    trap 'kill $mem_proc' ERR
+    
     ## run task script
     {{trace_cmd}} &
     local task=$!
 
     ## run mem stat
-    exec 10> >(nxf_mem_watch $task)
+    mem_fd=$(nxf_fd)
+    eval "exec $mem_fd> >(nxf_mem_watch $task)"
     local mem_proc=$!
 
     wait $task
@@ -198,8 +210,8 @@ nxf_trace_linux() {
     echo "read_bytes=${io_stat1[4]}"   >> $trace_file
     echo "write_bytes=${io_stat1[5]}"  >> $trace_file
 
-    ## join mem watcher
-    echo 'DONE' >&10
+    ## join nxf_mem_watch
+    [ -e /proc/$mem_proc ] && eval "echo 'DONE' >&$mem_fd" || true
     wait $mem_proc 2>/dev/null || true
     ## Bash prior 4.4 wait on a process substitution returns an error
     ## fallback on a while loop checking the proc pseudo file system

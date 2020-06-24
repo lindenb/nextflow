@@ -84,12 +84,16 @@ class K8sConfig implements Map<String,Object> {
         podOptions.getLabels()
     }
 
+    Map<String,String> getAnnotations() {
+        podOptions.getAnnotations()
+    }
+
     K8sDebug getDebug() {
         new K8sDebug( (Map<String,Object>)get('debug') )
     }
 
-    boolean getCleanup() {
-        target.cleanup == null || target.cleanup as boolean
+    boolean getCleanup(boolean defValue=true) {
+        target.cleanup == null ? defValue : target.cleanup as boolean
     }
 
     String getUserName() {

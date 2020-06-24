@@ -16,7 +16,6 @@
 
 package nextflow.processor
 
-
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
@@ -34,15 +33,16 @@ import nextflow.exception.ProcessTemplateException
 import nextflow.exception.ProcessUnrecoverableException
 import nextflow.file.FileHelper
 import nextflow.file.FileHolder
-import nextflow.script.EnvInParam
-import nextflow.script.FileInParam
-import nextflow.script.FileOutParam
-import nextflow.script.InParam
-import nextflow.script.OutParam
+import nextflow.script.BodyDef
 import nextflow.script.ScriptType
-import nextflow.script.StdInParam
-import nextflow.script.TaskBody
-import nextflow.script.ValueOutParam
+import nextflow.script.params.EnvInParam
+import nextflow.script.params.EnvOutParam
+import nextflow.script.params.FileInParam
+import nextflow.script.params.FileOutParam
+import nextflow.script.params.InParam
+import nextflow.script.params.OutParam
+import nextflow.script.params.StdInParam
+import nextflow.script.params.ValueOutParam
 /**
  * Models a task instance
  *
@@ -315,6 +315,8 @@ class TaskRun implements Cloneable {
 
     TaskContext context
 
+    Set<String> templateVars
+
     TaskProcessor.RunType runType = TaskProcessor.RunType.SUBMIT
 
     TaskRun clone() {
@@ -419,7 +421,7 @@ class TaskRun implements Cloneable {
     List<String> getOutputFilesNames() {
         def result = []
 
-        getOutputsByType(FileOutParam).keySet().each { FileOutParam param ->
+        for( FileOutParam param : getOutputsByType(FileOutParam).keySet() ) {
             result.addAll( param.getFilePatterns(context, workDir) )
         }
 
@@ -436,7 +438,10 @@ class TaskRun implements Cloneable {
     def <T extends InParam> Map<T,Object> getInputsByType( Class<T>... types ) {
 
         def result = [:]
-        inputs.findAll() { types.contains(it.key.class) }.each { result << it }
+        for( def it : inputs ) {
+            if( types.contains(it.key.class) )
+                result << it
+        }
         return result
     }
 
@@ -448,10 +453,9 @@ class TaskRun implements Cloneable {
      */
     def <T extends OutParam> Map<T,Object> getOutputsByType( Class<T>... types ) {
         def result = [:]
-        outputs.each {
-            if( types.contains(it.key.class) ) {
+        for( def it : outputs ) {
+            if( types.contains(it.key.class) )
                 result << it
-            }
         }
         return result
     }
@@ -515,6 +519,7 @@ class TaskRun implements Cloneable {
     static final public String CMD_START = '.command.begin'
     static final public String CMD_RUN = '.command.run'
     static final public String CMD_TRACE = '.command.trace'
+    static final public String CMD_ENV = '.command.env'
 
 
     String toString( ) {
@@ -543,6 +548,11 @@ class TaskRun implements Cloneable {
             result << str[i]
         }
         return result.toString()
+    }
+
+    List<String> getOutputEnvNames() {
+        final items = getOutputsByType(EnvOutParam)
+        return items ? new ArrayList<String>(items.keySet()*.name) : Collections.<String>emptyList()
     }
 
     @Memoized
@@ -616,9 +626,9 @@ class TaskRun implements Cloneable {
      * 2) extract the process code `source`
      * 3) assign the `script` code to execute
      *
-     * @param body A {@code TaskBody} object instance
+     * @param body A {@code BodyDef} object instance
      */
-    @PackageScope void resolve( TaskBody body ) {
+    @PackageScope void resolve(BodyDef body) {
 
         // -- initialize the task code to be executed
         this.code = body.closure.clone() as Closure
@@ -644,8 +654,6 @@ class TaskRun implements Cloneable {
                 script = renderScript(result)
             }
             else {
-                // note `toString` transform GString to plain string object resolving
-                // interpolated variables
                 script = result.toString()
             }
         }
@@ -655,9 +663,7 @@ class TaskRun implements Cloneable {
         catch( Throwable e ) {
             throw new ProcessUnrecoverableException("Process `$name` script contains error(s)", e)
         }
-
     }
-
 
     /**
      * Given a template script file and a binding, returns the rendered script content
@@ -677,7 +683,10 @@ class TaskRun implements Cloneable {
             if( shell ) {
                 engine.setPlaceholder(placeholderChar())
             }
-            return engine.render(source, context)
+            // eval the template string
+            engine.eval(source, context)
+            templateVars = engine.getVariableNames()
+            return engine.result
         }
         catch( NoSuchFileException e ) {
             throw new ProcessTemplateException("Process `${processor.name}` can't find template file: $template")
@@ -693,14 +702,76 @@ class TaskRun implements Cloneable {
 
     final protected String renderScript( script ) {
 
-        new TaskTemplateEngine(processor.grengine)
+        final engine = new TaskTemplateEngine(processor.grengine)
                 .setPlaceholder(placeholderChar())
                 .setEnableShortNotation(false)
-                .render(script.toString(), context)
+                .eval(script.toString(), context)
+        // fetch the template vars
+        templateVars = engine.getVariableNames()
+        // finally return the evaluated string
+        return engine.result
     }
 
     protected placeholderChar() {
         (config.placeholder ?: '!') as char
+    }
+
+    protected Set<String> getVariableNames() {
+        if( templateVars!=null )
+            return templateVars - processor.getDeclaredNames()
+        else
+            return context.getVariableNames()
+    }
+
+    /**
+     * @param variableNames The collection of variables referenced in the task script
+     * @param binding The script global binding
+     * @param context The task variable context
+     * @return The set of task variables accessed in global script context and not declared as input/output
+     */
+    Map<String,Object> getGlobalVars(Binding binding) {
+        final variableNames = getVariableNames()
+        final result = new HashMap(variableNames.size())
+        final processName = name
+
+        def itr = variableNames.iterator()
+        while( itr.hasNext() ) {
+            final varName = itr.next()
+
+            final p = varName.indexOf('.')
+            final baseName = p !=- 1 ? varName.substring(0,p) : varName
+
+            if( context.isLocalVar(baseName) ) {
+                // when the variable belong to the task local context just ignore it,
+                // because it must has been provided as an input parameter
+                continue
+            }
+
+            if( binding.hasVariable(baseName) ) {
+                def value
+                try {
+                    if( p == -1 ) {
+                        value = binding.getVariable(varName)
+                    }
+                    else {
+                        value = processor.grengine.run(varName, binding)
+                    }
+                }
+                catch( MissingPropertyException | NullPointerException e ) {
+                    value = null
+                    log.trace "Process `${processName}` cannot access global variable `$varName` -- Cause: ${e.message}"
+                }
+
+                // value for 'workDir' and 'baseDir' folders are added always as string
+                // in order to avoid to invalid the cache key when resuming the execution
+                if( varName=='workDir' || varName=='baseDir' )
+                    value = value.toString()
+
+                result.put( varName, value )
+            }
+
+        }
+        return result
     }
 
 }

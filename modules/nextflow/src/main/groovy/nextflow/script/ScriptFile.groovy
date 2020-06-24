@@ -53,6 +53,11 @@ class ScriptFile {
     Path localPath
 
     /**
+     * The name of the project
+     */
+    String projectName 
+
+    /**
      * @return Directory where the main script file is stored
      */
     Path getParent() { main?.parent }
@@ -78,10 +83,14 @@ class ScriptFile {
      */
     String getRevision() { revisionInfo?.name }
 
-    ScriptFile( File file ) {
+    ScriptFile( Path file ) {
         assert file
-        main = file.toPath().complete()
+        main = file.complete()
         localPath = main.parent
+    }
+
+    ScriptFile( File file ) {
+        this(file.toPath())
     }
 
 }

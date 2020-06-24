@@ -52,17 +52,17 @@ class Const {
     /**
      * The application version
      */
-    static public final String APP_VER = "19.04.0"
+    static public final String APP_VER = "20.05.0-edge"
 
     /**
      * The app build time as linux/unix timestamp
      */
-    static public final long APP_TIMESTAMP = 1555482342418
+    static public final long APP_TIMESTAMP = 1590955718696
 
     /**
      * The app build number
      */
-    static public final int APP_BUILDNUM = 5069
+    static public final int APP_BUILDNUM = 5366
 
 
     /**
@@ -122,7 +122,7 @@ class Const {
 """
       N E X T F L O W
       version ${APP_VER} build ${APP_BUILDNUM}
-      last modified ${APP_TIMESTAMP_UTC} ${deltaLocal()}
+      created ${APP_TIMESTAMP_UTC} ${deltaLocal()}
       cite doi:10.1038/nbt.3820
       http://nextflow.io
 """
@@ -144,5 +144,7 @@ class Const {
     static public final File DEFAULT_ROOT = System.getenv('NXF_ASSETS') ? new File(System.getenv('NXF_ASSETS')) : Const.APP_HOME_DIR.resolve('assets').toFile()
 
     static public final String DEFAULT_BRANCH = 'master'
+
+    static public final String SCOPE_SEP = ':'
 
 }

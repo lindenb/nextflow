@@ -15,14 +15,20 @@
  */
 
 package nextflow
+
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.attribute.PosixFilePermission
 
+import nextflow.config.Manifest
 import nextflow.container.ContainerConfig
-import nextflow.trace.StatsObserver
+import nextflow.exception.AbortOperationException
+import nextflow.script.ScriptFile
+import nextflow.script.WorkflowMetadata
+import nextflow.trace.WorkflowStatsObserver
 import nextflow.trace.TraceFileObserver
 import nextflow.util.Duration
+import nextflow.util.VersionNumber
 import spock.lang.Specification
 import spock.lang.Unroll
 import test.TestHelper
@@ -218,6 +224,18 @@ class SessionTest extends Specification {
 
     }
 
+    def 'test cacheable property' () {
+        when:
+        def session = new Session()
+        then:
+        session.cacheable
+
+        when:
+        session = new Session([cacheable: false])
+        then:
+        !session.cacheable
+    }
+
     def 'test create observers'() {
 
         def session
@@ -229,7 +247,7 @@ class SessionTest extends Specification {
         result = session.createObservers()
         then:
         result.size()==1
-        result.any { it instanceof StatsObserver }
+        result.any { it instanceof WorkflowStatsObserver }
 
         when:
         session = [:] as Session
@@ -277,15 +295,25 @@ class SessionTest extends Specification {
 
         given:
         def folder = TestHelper.createInMemTempDir()
-        def script = folder.resolve('pipeline.nf')
+        def file = folder.resolve('pipeline.nf'); file.text = 'println "hello"'
+        def script = new ScriptFile(file)
 
         when:
         def session = new Session([workDir: '../work'])
         session.init(script)
+
         then:
+        session.binding != null 
         session.baseDir == folder
         session.workDir.isAbsolute()
         !session.workDir.toString().contains('..')
+        session.scriptName == 'pipeline.nf'
+        session.classesDir.exists()
+        session.observers != null
+        session.workflowMetadata != null
+        
+        cleanup:
+        session.classesDir?.deleteDir()
 
     }
 
@@ -336,6 +364,8 @@ class SessionTest extends Specification {
         engine      | config
         'docker'    | [enabled: true, x:'alpha', y: 'beta']
         'docker'    | [enabled: true, x:'alpha', y: 'beta', registry: 'd.reg']
+        'podman'    | [enabled: true, x:'alpha', y: 'beta']
+        'podman'    | [enabled: true, x:'alpha', y: 'beta', registry: 'd.reg']
         'udocker'   | [enabled: true, x:'alpha', y: 'beta']
         'shifter'   | [enabled: true, x:'delta', y: 'gamma']
     }
@@ -411,7 +441,7 @@ class SessionTest extends Specification {
 
         when:
         def error = []
-        session.isValidProcessName(NAMES, SELECTOR, error)
+        session.checkValidProcessName(NAMES, SELECTOR, error)
         then:
         error[0] == MSG
         
@@ -426,4 +456,99 @@ class SessionTest extends Specification {
     }
 
 
+    static Map cfg(String config) {
+        new ConfigSlurper().parse(config).toMap()
+    }
+
+
+    def 'should fetch containers definition' () {
+
+        String text
+
+        when:
+        text = '''
+                process.container = 'beta'
+                '''
+        then:
+        new Session(cfg(text)).fetchContainers() == 'beta'
+
+
+        when:
+        text = '''
+                process {
+                    $proc1 { container = 'alpha' }
+                    $proc2 { container ='beta' }
+                }
+                '''
+        then:
+        new Session(cfg(text)).fetchContainers() == ['$proc1': 'alpha', '$proc2': 'beta']
+
+
+        when:
+        text = '''
+                process {
+                    $proc1 { container = 'alpha' }
+                    $proc2 { container ='beta' }
+                }
+
+                process.container = 'gamma'
+                '''
+        then:
+        new Session(cfg(text)).fetchContainers() == ['$proc1': 'alpha', '$proc2': 'beta', default: 'gamma']
+
+
+        when:
+        text = '''
+                process.container = { "ngi/rnaseq:${workflow.getRevision() ?: 'latest'}" }
+                '''
+
+        def meta = Mock(WorkflowMetadata); meta.getRevision() >> '1.2'
+        def session = new Session(cfg(text))
+        session.binding.setVariable('workflow',meta)
+        then:
+        session.fetchContainers() == 'ngi/rnaseq:1.2'
+    }
+
+
+    def 'should validate version'() {
+
+        given:
+        def manifest = Mock(Manifest)
+        def session = Spy(Session)
+
+        when:
+        session.checkVersion()
+        then:
+        session.getManifest() >> manifest
+        1 * session.getCurrentVersion() >> new VersionNumber('1.1')
+        1 * manifest.getNextflowVersion() >> '>= 1.0'
+        0 * session.showVersionWarning(_)
+
+        when:
+        session.checkVersion()
+        then:
+        session.getManifest() >> manifest
+        1 * session.getCurrentVersion() >> new VersionNumber('1.1')
+        1 * manifest.getNextflowVersion() >> '>= 1.2'
+        1 * session.showVersionWarning('>= 1.2')
+
+        when:
+        session.checkVersion()
+        then:
+        session.getManifest() >> manifest
+        1 * session.getCurrentVersion() >> new VersionNumber('1.1')
+        1 * manifest.getNextflowVersion() >> '! >= 1.2'
+        1 * session.showVersionError('>= 1.2')
+        thrown(AbortOperationException)
+
+        when:
+        session.checkVersion()
+        then:
+        session.getManifest() >> manifest
+        1 * manifest.getNextflowVersion() >> null
+        0 * session.getCurrentVersion() >> null
+        0 * session.showVersionWarning(_)
+        0 * session.showVersionError(_)
+
+    }
 }

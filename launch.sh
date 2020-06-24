@@ -18,15 +18,32 @@
 #set -u
 #set -o errexit
 
+function resolve_link() {
+    [[ ! -f $1 ]] && exit 1
+    if command -v realpath &>/dev/null; then
+      realpath "$1"
+    elif command -v readlink &>/dev/null; then
+      local target="$1"
+      cd $(dirname $target); target=$(basename $target)
+      while [ -L "$target" ]; do
+        target="$(readlink "$target")"
+        cd $(dirname $target); target=$(basename $target)
+      done
+      echo "$(cd "$(dirname "$target")"; pwd -P)/$target"
+    else
+      echo_yellow "WARN: Neither \`realpath\` nor \`readlink\` command can be found"
+      exit 1
+    fi
+}
+
 # the application 'base' folder
-bin_dir=`dirname "$0"`
-bin_dir=`cd "$bin_dir"; pwd`
+bin_dir=`dirname $(resolve_link $0)`
 base_dir=$bin_dir
 
 # define the java env
-java=java
+JAVA_BIN=java
 if test -n "$JAVA_HOME"; then
-	java="$JAVA_HOME/bin/java"
+	JAVA_BIN="$JAVA_HOME/bin/java"
 fi
 
 #
@@ -41,7 +58,7 @@ declare -a args=()
 DEBUG=''
 COLUMNS=${COLUMNS:-`tput cols 2> /dev/tty`}
 MAIN_CLASS=${MAIN_CLASS:-'nextflow.cli.Launcher'}
-JAVA_VER="$(java -version 2>&1)"
+JAVA_VER="$($JAVA_BIN -version 2>&1)"
 if [ $? -ne 0 ]; then
     echo "${JAVA_VER:-Failed to launch the Java virtual machine}"
     exit 1
@@ -49,13 +66,13 @@ fi
 JAVA_VER=$(echo "$JAVA_VER" | awk '/version/ {gsub(/"/, "", $3); print $3}')
 major=${BASH_REMATCH[1]}
 minor=${BASH_REMATCH[2]}
-version_check="^(1.8|9|10|11)"
+version_check="^(1.8|9|10|11|12)"
 if [[ ! $JAVA_VER =~ $version_check ]]; then
     echo "Error: cannot find Java or it's a wrong version -- please make sure that Java 8 or higher is installed"
     exit 1
 fi
-JVM_ARGS+=" -Dfile.encoding=UTF-8 -noverify -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
-[[ $JAVA_VER =~ ^9|10|11 ]] && JVM_ARGS+=" --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.fs=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.http=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.https=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.ftp=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.file=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --illegal-access=deny"
+JVM_ARGS+=" -Dfile.encoding=UTF-8 -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+[[ $JAVA_VER =~ ^9|10|11|12 ]] && JVM_ARGS+=" --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.fs=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.http=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.https=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.ftp=ALL-UNNAMED --add-opens=java.base/sun.net.www.protocol.file=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --illegal-access=deny"
 
 ## flight recorded -- http://docs.oracle.com/javacomponents/jmc-5-4/jfr-runtime-guide/run.htm
 ##JVM_ARGS+=" -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:StartFlightRecording=duration=60s,filename=myrecording.jfr"
@@ -119,4 +136,4 @@ if [ "$DEBUG" != '' ]; then
 fi
 
 # Launch the APP
-exec java $JVM_ARGS $DEBUG $NXF_OPTS -cp "$CLASSPATH" "$MAIN_CLASS" "${args[@]}"
+exec $JAVA_BIN $JVM_ARGS $DEBUG $NXF_OPTS -cp "$CLASSPATH" "$MAIN_CLASS" "${args[@]}"

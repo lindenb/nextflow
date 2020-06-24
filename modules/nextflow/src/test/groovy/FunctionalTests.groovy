@@ -15,18 +15,20 @@
  */
 
 
+
 import spock.lang.Shared
 import spock.lang.Specification
+import spock.lang.Timeout
 
 import nextflow.config.ConfigParser
 import nextflow.processor.TaskProcessor
-import nextflow.script.ScriptRunner
 import nextflow.util.MemoryUnit
-
+import nextflow.script.TestScriptRunner
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
+@Timeout(5)
 class FunctionalTests extends Specification {
 
     @Shared
@@ -59,7 +61,7 @@ class FunctionalTests extends Specification {
             '''
 
         when:
-        def runner = new ScriptRunner( [env: environment] )
+        def runner = new TestScriptRunner( [env: environment] )
 
         then:
         runner.setScript(script).execute() == ['value1', -1]
@@ -80,7 +82,7 @@ class FunctionalTests extends Specification {
 
             return [ x, y, len ]
             """
-        def runner = new ScriptRunner()
+        def runner = new TestScriptRunner()
         def result = runner.setScript(script).execute(['hello', 'hola'] )
 
         then:
@@ -119,7 +121,7 @@ class FunctionalTests extends Specification {
 
             '''
 
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
 
@@ -141,7 +143,7 @@ class FunctionalTests extends Specification {
         def CONFIG = '''
             process.ext.foo = 'hello'
         '''
-        def cfg = new ConfigSlurper().parse(CONFIG)
+        def cfg = new ConfigParser().parse(CONFIG)
 
         when:
         def script = '''
@@ -155,7 +157,7 @@ class FunctionalTests extends Specification {
 
             '''
 
-        def runner = new ScriptRunner(cfg).setScript(script)
+        def runner = new TestScriptRunner(cfg).setScript(script)
         runner.execute()
         def processor = runner.scriptObj.taskProcessor
         then:
@@ -181,7 +183,7 @@ class FunctionalTests extends Specification {
                 }
             }
         '''
-        def cfg = new ConfigSlurper().parse(configStr)
+        def cfg = new ConfigParser().parse(configStr)
 
         when:
         def script = '''
@@ -193,7 +195,7 @@ class FunctionalTests extends Specification {
 
             '''
 
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
         println processor.config.ext
@@ -213,11 +215,10 @@ class FunctionalTests extends Specification {
                 cpus = { 2 * task.attempt }
                 memory = { 1.GB * task.attempt  }
                 time = { 1.h * task.attempt }
-
-                $taskHello.errorStrategy = 'finish'
+                withName: taskHello{ errorStrategy = 'finish' }
             }
             '''
-        def cfg = new ConfigSlurper().parse(configStr)
+        def cfg = new ConfigParser().parse(configStr)
 
 
         when:
@@ -235,7 +236,7 @@ class FunctionalTests extends Specification {
 
             '''
 
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
 
@@ -271,8 +272,10 @@ class FunctionalTests extends Specification {
                     queue = 'big-partition'                
                 }
                 
-                $legacy.cpus = 3 
-                $legacy.queue = 'legacy-queue'
+                withName: legacy {
+                    cpus = 3 
+                    queue = 'legacy-queue'
+                }
             }
             '''
 
@@ -290,7 +293,7 @@ class FunctionalTests extends Specification {
                 '''
 
             def cfg = new ConfigParser().parse(CONFIG)
-            def runner = new ScriptRunner(cfg)
+            def runner = new TestScriptRunner(cfg)
             runner.setScript(script).execute()
             def processor = runner.scriptObj.taskProcessor
 
@@ -314,7 +317,7 @@ class FunctionalTests extends Specification {
                 '''
 
             cfg = new ConfigParser().parse(CONFIG)
-            runner = new ScriptRunner(cfg)
+            runner = new TestScriptRunner(cfg)
             runner.setScript(script).execute()
             processor = runner.scriptObj.taskProcessor
 
@@ -338,7 +341,7 @@ class FunctionalTests extends Specification {
                 '''
 
             cfg = new ConfigParser().parse(CONFIG)
-            runner = new ScriptRunner(cfg)
+            runner = new TestScriptRunner(cfg)
             runner.setScript(script).execute()
             processor = runner.scriptObj.taskProcessor
 
@@ -364,7 +367,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
 
@@ -415,7 +418,7 @@ class FunctionalTests extends Specification {
                 '''
 
         def cfg = new ConfigParser().parse(CONFIG)
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
 
@@ -439,7 +442,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
 
@@ -468,7 +471,7 @@ class FunctionalTests extends Specification {
                 '''
 
         def cfg = new ConfigParser().parse(config)
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
 
@@ -496,7 +499,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(config)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
 
@@ -523,7 +526,7 @@ class FunctionalTests extends Specification {
                 '''
 
         def cfg = new ConfigParser().parse(CONFIG)
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
         then:
@@ -546,7 +549,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
         then:
@@ -571,7 +574,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
         then:
@@ -597,7 +600,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
         then:
@@ -626,7 +629,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
         then:
@@ -654,7 +657,7 @@ class FunctionalTests extends Specification {
                 '''
 
         def cfg = new ConfigParser().parse(CONFIG)
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         def processor = runner.scriptObj.taskProcessor
         then:
@@ -679,7 +682,7 @@ class FunctionalTests extends Specification {
                 '''
 
         cfg = new ConfigParser().parse(CONFIG)
-        runner = new ScriptRunner(cfg)
+        runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         processor = runner.scriptObj.taskProcessor
         then:
@@ -707,7 +710,7 @@ class FunctionalTests extends Specification {
                 '''
 
         def cfg = new ConfigParser().parse(CONFIG)
-        def runner = new ScriptRunner(cfg)
+        def runner = new TestScriptRunner(cfg)
         runner.setScript(script).execute()
         then:
         noExceptionThrown()

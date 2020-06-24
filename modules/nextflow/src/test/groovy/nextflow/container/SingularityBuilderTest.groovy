@@ -31,6 +31,7 @@ class SingularityBuilderTest extends Specification {
         given:
         def path1 = Paths.get('/foo/data/file1')
         def path2 = Paths.get('/bar/data/file2')
+        def path3 = Paths.get('/bar/data file')
 
         expect:
         new SingularityBuilder('busybox')
@@ -73,6 +74,13 @@ class SingularityBuilderTest extends Specification {
                 .params(readOnlyInputs: true)
                 .build()
                 .runCommand == 'set +u; env - PATH="$PATH" SINGULARITYENV_TMP="$TMP" SINGULARITYENV_TMPDIR="$TMPDIR" singularity exec -B /foo/data/file1:/foo/data/file1:ro -B "$PWD" ubuntu'
+
+        new SingularityBuilder('ubuntu')
+                .addMount(path3)
+                .params(autoMounts: true)
+                .build()
+                .runCommand == 'set +u; env - PATH="$PATH" SINGULARITYENV_TMP="$TMP" SINGULARITYENV_TMPDIR="$TMPDIR" singularity exec -B /bar/data\\ file -B "$PWD" ubuntu'
+
     }
 
     def 'should return export variables' () {
@@ -121,8 +129,16 @@ class SingularityBuilderTest extends Specification {
         def builder = [:] as SingularityBuilder
 
         expect:
-        builder.makeEnv('X=1').toString() == 'SINGULARITYENV_X=1'
-        builder.makeEnv([VAR_X:1, VAR_Y: 2]).toString() == 'SINGULARITYENV_VAR_X="1" SINGULARITYENV_VAR_Y="2"'
-        builder.makeEnv('BAR').toString() == '${BAR:+SINGULARITYENV_BAR="$BAR"}'
+        builder.makeEnv(ENV).toString() == RESULT
+
+        where:
+        ENV                         | RESULT
+        'X=1'                       | 'SINGULARITYENV_X=1'
+        'BAR'                       | '${BAR:+SINGULARITYENV_BAR="$BAR"}'
+        [VAR_X:1, VAR_Y: 2]         | 'SINGULARITYENV_VAR_X="1" SINGULARITYENV_VAR_Y="2"'
+        [SINGULARITY_BIND: 'foo', SINGULARITYENV_FOO: 'x', BAR: 'y'] | 'SINGULARITY_BIND="foo" SINGULARITYENV_FOO="x" SINGULARITYENV_BAR="y"'
+        'SINGULARITY_FOO'          | '${SINGULARITY_FOO:+SINGULARITY_FOO="$SINGULARITY_FOO"}'
+        'SINGULARITYENV_FOO'       | '${SINGULARITYENV_FOO:+SINGULARITYENV_FOO="$SINGULARITYENV_FOO"}'
+        'SINGULARITYENV_X=1'       | 'SINGULARITYENV_X=1'
     }
 }

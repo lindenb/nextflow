@@ -15,7 +15,10 @@
  */
 
 package nextflow.scm
+
+
 import groovy.json.JsonSlurper
+import groovy.transform.Canonical
 import groovy.transform.CompileStatic
 import groovy.transform.Memoized
 import groovy.util.logging.Slf4j
@@ -30,6 +33,18 @@ import nextflow.exception.AbortOperationException
 @Slf4j
 @CompileStatic
 abstract class RepositoryProvider {
+
+    @Canonical
+    static class TagInfo {
+        String name
+        String commitId
+    }
+
+    @Canonical
+    static class BranchInfo {
+        String name
+        String commitId
+    }
 
     /**
      * The pipeline qualified name following the syntax {@code owner/repository}
@@ -87,6 +102,10 @@ abstract class RepositoryProvider {
      */
     abstract String getRepositoryUrl()
 
+    List<BranchInfo> getBranches() { throw new UnsupportedOperationException("Get branches operation not support by ${this.getClass().getSimpleName()} provider") }
+
+    List<TagInfo> getTags() { throw new UnsupportedOperationException("Get tags operation not support by ${this.getClass().getSimpleName()} provider") }
+
     /**
      * Invoke the API request specified
      *
@@ -139,11 +158,11 @@ abstract class RepositoryProvider {
 
         switch( code ) {
             case 401:
-                log.debug "Response status: $code -- ${connection.getErrorStream().text}"
+                log.debug "Response status: $code -- ${connection.getErrorStream()?.text}"
                 throw new AbortOperationException("Not authorized -- Check that the ${name.capitalize()} user name and password provided are correct")
 
             case 403:
-                log.debug "Response status: $code -- ${connection.getErrorStream().text}"
+                log.debug "Response status: $code -- ${connection.getErrorStream()?.text}"
                 def limit = connection.getHeaderField('X-RateLimit-Remaining')
                 if( limit == '0' ) {
                     def message = config.auth ? "Check ${name.capitalize()}'s API rate limits for more details" : "Provide your ${name.capitalize()} user name and password to get a higher rate limit"
@@ -153,10 +172,29 @@ abstract class RepositoryProvider {
                     def message = config.auth ? "Check that the ${name.capitalize()} user name and password provided are correct" : "Provide your ${name.capitalize()} user name and password to access this repository"
                     throw new AbortOperationException("Forbidden -- $message")
                 }
+            case 404:
+                log.debug "Response status: $code -- ${connection.getErrorStream()?.text}"
+                throw new AbortOperationException("Remote resource not found: ${connection.getURL()}")
         }
-
     }
 
+    @Memoized
+    protected <T> List<T> invokeAndResponseWithPaging(String request, Closure<T> parse) {
+        int page = 0
+        final result = new ArrayList()
+        while( true ) {
+            final url = request + (request.contains('?') ? "&page=${++page}": "?page=${++page}")
+            final response = invoke(url)
+            final list = (List) new JsonSlurper().parseText(response)
+            if( !list )
+                break
+
+            for( def item : list ) {
+                result.add( parse(item) )
+            }
+        }
+        return result
+    }
 
     /**
      * Invoke the API request specified and parse the JSON response
@@ -224,6 +262,9 @@ abstract class RepositoryProvider {
 
             case 'bitbucket':
                 return new BitbucketRepositoryProvider(project, config)
+
+            case 'bitbucketserver':
+                return new BitbucketServerRepositoryProvider(project, config)
 
             case 'gitlab':
                 return new GitlabRepositoryProvider(project, config)

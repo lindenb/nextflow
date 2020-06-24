@@ -24,13 +24,9 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 
 import groovy.transform.CompileStatic
 import groovy.transform.EqualsAndHashCode
-import groovy.transform.Memoized
 import groovy.transform.PackageScope
 import groovy.transform.ToString
 import groovy.util.logging.Slf4j
@@ -78,17 +74,23 @@ class PublishDir {
      */
     Closure saveAs
 
+    /**
+     * Enable disable publish rule
+     */
+    boolean enabled = true
+
     private PathMatcher matcher
 
     private FileSystem sourceFileSystem
-
-    private TaskProcessor processor
 
     private Path sourceDir
 
     private String stageInMode
 
     private boolean nullPathWarn
+
+    @Lazy
+    private ExecutorService threadPool = (Global.session as Session).getFileTransferThreadPool()
 
     void setPath( Closure obj ) {
         setPath( obj.call() as Path )
@@ -144,32 +146,17 @@ class PublishDir {
         if( params.saveAs )
             result.saveAs = params.saveAs
 
+        if( params.enabled!=null )
+            result.enabled = params.enabled as boolean
+
         return result
     }
 
-    /**
-     * Apply the publishing process to the specified {@link TaskRun} instance
-     *
-     * @param task The task whose output need to be published
-     */
     @CompileStatic
-    void apply( List<Path> files, TaskRun task ) {
+    protected void apply0(Set<Path> files) {
+        assert path
 
-        if( !files )
-            return
-
-        if( !path )
-            throw new IllegalStateException("Target path for directive publishDir cannot be null")
-
-        if( nullPathWarn )
-            log.warn "Process `$task.processor.name` publishDir path contains a variable with a null value"
-
-        this.processor = task.processor
-        this.sourceDir = task.targetDir
-        this.sourceFileSystem = sourceDir.fileSystem
-        this.stageInMode = task.config.stageInMode
         createPublishDir()
-
         validatePublishMode()
 
         /*
@@ -187,15 +174,46 @@ class PublishDir {
          * iterate over the file parameter and publish each single file
          */
         for( Path value : files ) {
-            apply(value, inProcess)
+            apply1(value, inProcess)
         }
+    }
+
+    void apply( Set<Path> files, Path sourceDir ) {
+        if( !files || !enabled )
+            return
+        this.sourceDir = sourceDir
+        this.sourceFileSystem = sourceDir ? sourceDir.fileSystem : null
+        apply0(files)
+    }
+    /**
+     * Apply the publishing process to the specified {@link TaskRun} instance
+     *
+     * @param task The task whose output need to be published
+     */
+    @CompileStatic
+    void apply( Set<Path> files, TaskRun task ) {
+
+        if( !files || !enabled )
+            return
+
+        if( !path )
+            throw new IllegalStateException("Target path for directive publishDir cannot be null")
+
+        if( nullPathWarn )
+            log.warn "Process `$task.processor.name` publishDir path contains a variable with a null value"
+
+        this.sourceDir = task.targetDir
+        this.sourceFileSystem = sourceDir.fileSystem
+        this.stageInMode = task.config.stageInMode
+
+        apply0(files)
     }
 
 
     @CompileStatic
-    protected void apply( Path source, boolean inProcess ) {
+    protected void apply1(Path source, boolean inProcess ) {
 
-        def target = sourceDir.relativize(source)
+        def target = sourceDir ? sourceDir.relativize(source) : source.getFileName()
         if( matcher && !matcher.matches(target) ) {
             // skip not matching file
             return
@@ -211,7 +229,7 @@ class PublishDir {
             safeProcessFile(source, destination)
         }
         else {
-            executor.submit({ safeProcessFile(source, destination) } as Runnable)
+            threadPool.submit({ safeProcessFile(source, destination) } as Runnable)
         }
 
     }
@@ -320,7 +338,7 @@ class PublishDir {
     @PackageScope
     void validatePublishMode() {
 
-        if( sourceFileSystem != path.fileSystem || path.fileSystem != FileSystems.default ) {
+        if( (sourceFileSystem && sourceFileSystem != path.fileSystem) || path.fileSystem != FileSystems.default ) {
             if( !mode ) {
                 mode = Mode.COPY
             }
@@ -335,23 +353,5 @@ class PublishDir {
         }
     }
 
-    @Memoized // <-- this guarantees that the same executor is used across different publish dir in the same session
-    @CompileStatic
-    static synchronized ExecutorService createExecutor(Session session) {
-        final result = new ThreadPoolExecutor(0, Runtime.runtime.availableProcessors(),
-                60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>());
 
-        session?.onShutdown {
-            result.shutdown()
-            result.awaitTermination(36,TimeUnit.HOURS)
-        }
-
-        return result
-    }
-
-    @PackageScope
-    static ExecutorService getExecutor() {
-        createExecutor(Global.session as Session)
-    }
 }

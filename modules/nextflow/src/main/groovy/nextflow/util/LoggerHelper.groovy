@@ -16,9 +16,13 @@
 
 package nextflow.util
 
+import static nextflow.Const.*
+
 import java.lang.reflect.Field
 import java.nio.file.NoSuchFileException
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.regex.Pattern
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.LoggerContext
@@ -42,18 +46,30 @@ import ch.qos.logback.core.spi.FilterReply
 import ch.qos.logback.core.util.FileSize
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
+import groovyx.gpars.dataflow.DataflowReadChannel
+import groovyx.gpars.dataflow.DataflowWriteChannel
 import nextflow.Global
 import nextflow.Session
 import nextflow.cli.CliOptions
 import nextflow.cli.Launcher
 import nextflow.exception.AbortOperationException
 import nextflow.exception.ProcessException
+import nextflow.exception.ScriptRuntimeException
+import nextflow.extension.OpCall
 import nextflow.file.FileHelper
+import nextflow.script.BaseScript
+import nextflow.script.ChainableDef
+import nextflow.script.ComponentDef
+import nextflow.script.CompositeDef
+import nextflow.script.FunctionDef
+import nextflow.script.ScriptMeta
+import nextflow.script.WorkflowBinding
+import nextflow.script.WorkflowDef
 import org.apache.commons.lang.exception.ExceptionUtils
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import static nextflow.Const.MAIN_PACKAGE
-import static nextflow.Const.S3_UPLOADER_CLASS
+import org.slf4j.Marker
+import org.slf4j.MarkerFactory
 /**
  * Helper class to setup the logging subsystem
  *
@@ -61,6 +77,10 @@ import static nextflow.Const.S3_UPLOADER_CLASS
  */
 @CompileStatic
 class LoggerHelper {
+
+    static private Logger log = LoggerFactory.getLogger(LoggerHelper)
+
+    static public Marker STICKY = MarkerFactory.getMarker('sticky')
 
     static private String STARTUP_ERROR = 'startup failed:\n'
 
@@ -120,8 +140,18 @@ class LoggerHelper {
         this.loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory()
     }
 
+    private boolean containsClassName(List<String> debug, List<String> trace, String prefix) {
+        for( String it : debug ) {
+            if( it.startsWith(prefix) ) return true
+        }
+        for( String it : trace ) {
+            if( it.startsWith(prefix) ) return true
+        }
+        return false
+    }
+
     void setup() {
-        logFileName = opts.logFile
+        logFileName = opts.logFile ?: System.getenv('NXF_LOG_FILE')
 
         final boolean quiet = opts.quiet
         final List<String> debugConf = opts.debug ?: new ArrayList<String>()
@@ -135,12 +165,17 @@ class LoggerHelper {
         packages[MAIN_PACKAGE] = quiet ? Level.WARN : Level.INFO
 
         // -- add the S3 uploader by default
-        if( !debugConf.contains(S3_UPLOADER_CLASS) && !traceConf.contains(S3_UPLOADER_CLASS) ) {
+        if( !containsClassName(debugConf,traceConf, 'com.upplication.s3fs') )
             debugConf << S3_UPLOADER_CLASS
-        }
+        if( !containsClassName(debugConf,traceConf, 'io.seqera') )
+            debugConf << 'io.seqera'
 
-        debugConf.each { packages[it] = Level.DEBUG }
-        traceConf.each { packages[it] = Level.TRACE }
+        for( def it : debugConf ) {
+            packages[it] = Level.DEBUG
+        }
+        for( def it : traceConf ) {
+            packages[it] = Level.TRACE
+        }
 
         // -- the console appender
         this.consoleAppender = createConsoleAppender()
@@ -171,9 +206,13 @@ class LoggerHelper {
         }
 
         // -- debug packages specified by the user
-        debugConf.each { String clazz -> createLogger(clazz, Level.DEBUG) }
+        for( String clazz : debugConf ) {
+            createLogger(clazz, Level.DEBUG)
+        }
         // -- trace packages specified by the user
-        traceConf.each { String clazz -> createLogger(clazz, Level.TRACE) }
+        for( String clazz : traceConf ) {
+            createLogger(clazz, Level.TRACE)
+        }
 
         if(!consoleAppender)
             logger.debug "Console appender: disabled"
@@ -389,13 +428,11 @@ class LoggerHelper {
      * Find out the script line where the error has thrown
      */
     static protected void appendFormattedMessage( StringBuilder buffer, ILoggingEvent event, Throwable fail, Session session) {
-
-        final scriptName = session?.scriptName
-        final className = session?.scriptClassName
+        final className = session?.script?.getClass()?.getName()
         final message = event.getFormattedMessage()
-        final quiet = fail instanceof AbortOperationException || fail instanceof ProcessException
-        List error = fail ? findErrorLine(fail, className) : null
+        final quiet = fail instanceof AbortOperationException || fail instanceof ProcessException || ScriptRuntimeException
         final normalize = { String str -> str ?. replace("${className}.", '')}
+        List error = fail ? findErrorLine(fail, ScriptMeta.allScriptNames()) : null
 
         // error string is not shown for abort operation
         if( !quiet ) {
@@ -406,6 +443,9 @@ class LoggerHelper {
         if( fail instanceof MissingPropertyException ) {
             def name = fail.property ?: getDetailMessage(fail)
             buffer.append("No such variable: ${name}")
+        }
+        else if( fail instanceof MissingMethodException ) {
+            buffer.append(getMissingMethodMessage(fail))
         }
         else if( fail instanceof NoSuchFileException ) {
             buffer.append("No such file: ${normalize(fail.message)}")
@@ -427,7 +467,7 @@ class LoggerHelper {
 
         // extra formatting
         if( error ) {
-            buffer.append(" -- Check script '${scriptName}' at line: ${error[1]} or see '${logFileName}' file for more details")
+            buffer.append(" -- Check script '${error[0]}' at line: ${error[1]} or see '${logFileName}' file for more details")
             buffer.append(CoreConstants.LINE_SEPARATOR)
         }
         else if( logFileName && !quiet ) {
@@ -456,25 +496,87 @@ class LoggerHelper {
         }
     }
 
-    static @PackageScope List<String> findErrorLine( Throwable e, String scriptName ) {
-        def lines = ExceptionUtils.getStackTrace(e).split('\n')
+    static String getMissingMethodMessage(MissingMethodException error) {
+        try {
+            return getMissingMethodMessage0(error)
+        }
+        catch( Throwable e ) {
+            return error?.message
+        }
+    }
+
+    private static String getMissingMethodMessage0(MissingMethodException error) {
+        def name = error.getMethod()
+        def type = error.getType()
+        def args = error.getArguments()
+
+        String left = fmtType(type)
+
+        String right = args?.collect { fmtValue(it) }?.join(', ')
+
+        if( name == 'or' )
+            return "Invalid invocation of operator | (pipe) with left operand: $left and right operand: $right"
+
+        String msg
+        def hasLeftTarget = !WorkflowBinding.isAssignableFrom(type) && !BaseScript.isAssignableFrom(type)
+        def found = type.getMethods().find { it.name == name }
+        if( found ) {
+            msg = "Invalid method invocation `$name` with arguments: $right"
+            if( hasLeftTarget ) msg += " on $left"
+        }
+        else {
+            msg = "Unknown method invocation `$name`"
+            if( hasLeftTarget ) msg += " on $left"
+            def tips = type.getMethods().collect { it.name }.closest(name)
+            if( tips )
+                msg += " -- Did you mean?\n" + tips.collect { "  $it"}.join('\n')
+        }
+
+        return msg
+    }
+
+    static @PackageScope List<String> findErrorLine( Throwable e, Map<String, Path> allNames ) {
+        def lines = getErrorLines(e)
         List error = null
         for( String str : lines ) {
-            if( (error=getErrorLine(str,scriptName))) {
+            if( (error=getErrorLine(str,allNames))) {
                 break
             }
         }
         return error
     }
 
-    @PackageScope
-    static List<String> getErrorLine( String line, String scriptName = null) {
-        if( scriptName==null )
-            scriptName = /.+\.nf/
+    static @PackageScope String[] getErrorLines(Throwable e) {
+        try {
+            return ExceptionUtils.getStackTrace(e).split('\n')
+        }
+        catch( Throwable t ) {
+            log.warn "Oops .. something wrong formatting the error stack trace | ${t.message ?: t}", e
+            return Collections.emptyList() as String[]
+        }
+    }
 
-        def pattern = ~/.*\(($scriptName):(\d*)\).*/
-        def m = pattern.matcher(line)
-        return m.matches() ? [m.group(1), m.group(2)] : null
+    static private Pattern ERR_LINE_REGEX = ~/\((Script_[0-9a-f]{8}):(\d*)\)$/
+
+    @PackageScope
+    static List<String> getErrorLine( String str, Map<String,Path> allNames ) {
+        def m = ERR_LINE_REGEX.matcher(str)
+        if( m.find() ) {
+            def name = m.group(1)
+            def line = m.group(2)
+            if( allNames[name] ) {
+                final pwd = System.getProperty("user.dir")
+                def script = allNames[name].toUriString()
+                if( script.startsWith(pwd) ) {
+                    script = script.substring(pwd.length())
+                    while( script.startsWith('/') )
+                        script = script.substring(1)
+                }
+
+                return [ script, line ]
+            }
+        }
+        return null
     }
 
     /**
@@ -517,6 +619,9 @@ class LoggerHelper {
                 if( !renderer )
                     System.out.println(message)
 
+                else if( event.marker == STICKY )
+                    renderer.appendSticky(message)
+
                 else if( event.level==Level.ERROR )
                     renderer.appendError(message)
 
@@ -533,4 +638,89 @@ class LoggerHelper {
         }
     }
 
+    static private char OPEN_CH = '[' as char
+    static private char CLOSE_CH = ']' as char
+    static private char SLASH_CH = '/' as char
+    static private int ZERO_CH = '0' as char
+    static private int NINE_CH = '9' as char
+    static private int ALPHA_CH = 'a' as char
+    static private int EFFE_CH = 'f' as char
+
+    static boolean isHashLogPrefix(String str) {
+        if( str?.length()<10 )
+            return false
+        if( str.charAt(0) != OPEN_CH )
+            return false
+        if( str.charAt(3) != SLASH_CH )
+            return false
+        if( str.charAt(10) != CLOSE_CH )
+            return false
+        if( !isHex(str.charAt(1)) )
+            return false
+        if( !isHex(str.charAt(2)) )
+            return false
+
+        for( int i=4; i<10; i++ ) {
+            if( !isHex(str.charAt(i)))
+                return false
+        }
+
+        return true
+    }
+
+    static protected boolean isHex(char ch) {
+        (ch >= ZERO_CH && ch <= NINE_CH) || (ch >= ALPHA_CH && ch <= EFFE_CH)
+    }
+
+
+    static String fmtValue( obj ) {
+        if( obj instanceof ComponentDef )
+            return obj.getSignature()
+        if( obj != null )
+            return "$obj (${obj.getClass().getName()})"
+        return 'null'
+    }
+
+    static String fmtType( ChainableDef obj ) {
+        if( obj instanceof ComponentDef )
+            return obj.getSignature()
+        if( obj != null )
+            return "$obj.type '$obj.name'"
+        else
+            return "component null"
+    }
+
+    static String fmtType( OpCall obj ) {
+        return obj ? "operator '${obj?.getMethodName()}'" : "operator null"
+    }
+
+    static String fmtType( Object type ) {
+        if( type instanceof Class ) {
+            if( DataflowWriteChannel.isAssignableFrom(type) || DataflowReadChannel .isAssignableFrom(type) )
+                return 'channel type'
+            if( ComponentDef.isAssignableFrom(type) )
+                return 'process type'
+            if( FunctionDef.isAssignableFrom(type) )
+                return 'function type'
+            if( WorkflowDef.isAssignableFrom(type) )
+                return 'workflow type'
+            if( CompositeDef.isAssignableFrom(type) )
+                return 'expression type'
+            if( OpCall.isAssignableFrom(type) )
+                return 'operator type'
+
+            return type.getSimpleName() + ' type'
+        }
+
+        if( type instanceof ChainableDef )
+            return fmtType((ChainableDef)type)
+
+        if( type instanceof OpCall )
+            return fmtType((OpCall)type)
+
+        if( type instanceof DataflowWriteChannel || type instanceof DataflowReadChannel )
+            return "channel object"
+
+        type == null ? "null object" : "${type.getClass().getSimpleName()} object"
+    }
 }

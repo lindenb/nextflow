@@ -136,6 +136,56 @@ The amount of resources requested by each job submission is defined by the follo
 * :ref:`process-memory`
 * :ref:`process-clusterOptions`
 
+.. _pbspro-executor:
+
+PBS Pro
+=======
+
+The `PBS Pro` executor allows you to run your pipeline script by using the `PBS Pro <https://www.pbspro.org/>`_ resource manager.
+
+Nextflow manages each process as a separate job that is submitted to the cluster by using the ``qsub`` command provided
+by the scheduler.
+
+Being so, the pipeline must be launched from a node where the ``qsub`` command is available, that is, in a common usage
+scenario, the cluster `login` node.
+
+To enable the PBS Pro executor simply set the property ``process.executor = 'pbspro'`` in the ``nextflow.config`` file.
+
+The amount of resources requested by each job submission is defined by the following process directives:
+
+* :ref:`process-cpus`
+* :ref:`process-queue`
+* :ref:`process-time`
+* :ref:`process-memory`
+* :ref:`process-clusterOptions`
+
+.. _moab-executor:
+
+Moab
+====
+
+The `Moab` executor allows you to run your pipeline script by using the
+`Moab <https://en.wikipedia.org/wiki/Moab_Cluster_Suite>`_ resource manager by
+`Adaptive Computing <http://www.adaptivecomputing.com/>`_.
+
+.. warning:: This is an incubating feature. It may change in future Nextflow releases.
+
+Nextflow manages each process as a separate job that is submitted to the cluster by using the ``msub`` command provided
+by the resource manager.
+
+Being so, the pipeline must be launched from a node where the ``msub`` command is available, that is, in a common usage
+scenario, the compute cluster `login` node.
+
+To enable the `Moab` executor simply set the property ``process.executor = 'moab'`` in the ``nextflow.config`` file.
+
+The amount of resources requested by each job submission is defined by the following process directives:
+
+* :ref:`process-cpus`
+* :ref:`process-queue`
+* :ref:`process-time`
+* :ref:`process-memory`
+* :ref:`process-clusterOptions`
+
 .. _nqsii-executor:
 
 NQSII
@@ -172,6 +222,11 @@ Nextflow manages each process as a separate job that is submitted to the cluster
 
 Being so, the pipeline must be launched from a node where the ``condor_submit`` command is available, that is, in a
 common usage scenario, the cluster `head` node.
+
+.. note::
+  The HTCondor executor for Nextflow does not support at this time the HTCondor ability to transfer input/output data to
+  the corresponding job computing node. Therefore the data needs to be made accessible to the computing nodes using
+  a shared file system directory from where the Nextflow workflow has to be executed (or specified via the ``-w`` option).
 
 To enable the HTCondor executor simply set to ``process.executor`` property to ``condor`` value in the ``nextflow.config`` file.
 
@@ -238,24 +293,24 @@ running workloads. Moreover a S3 bucket must be used as pipeline work directory.
 
 See the :ref:`AWS Batch<awscloud-batch>` page for further configuration details.
 
-.. _google-pipelines-executor:
+.. _google-lifesciences-executor:
 
-Google Pipelines
-================
+Google Life Sciences
+====================
 
-`Genomics Pipelines <https://cloud.google.com/genomics/>`_ is a managed computing service that allows the execution of
+`Google Cloud Life Sciences <https://cloud.google.com/life-sciences>`_ is a managed computing service that allows the execution of
 containerized workloads in the Google Cloud Platform infrastructure.
 
-Nextflow provides built-in support for Genomics Pipelines API which allows the seamless deployment of a Nextflow pipeline
-in the cloud, offloading the process executions as pipelines (it requires Nextflow 19.1.0 or later).
+Nextflow provides built-in support for Life Sciences API which allows the seamless deployment of a Nextflow pipeline
+in the cloud, offloading the process executions as pipelines (it requires Nextflow 20.01.0 or later).
 
 The pipeline processes must specify the Docker image to use by defining the ``container`` directive, either in the pipeline
 script or the ``nextflow.config`` file. Moreover the pipeline work directory must be located in a Google Storage
 bucket.
 
-To enable this executor set the property ``process.executor = 'google-pipelines'`` in the ``nextflow.config`` file.
+To enable this executor set the property ``process.executor = 'google-lifesciences'`` in the ``nextflow.config`` file.
 
-See the :ref:`Google Pipelines <google-pipelines>` page for further configuration details.
+See the :ref:`Google Life Sciences <google-lifesciences>` page for further configuration details.
 
 .. _ga4ghtes-executor:
 
@@ -279,9 +334,13 @@ To use this feature define the following variables in the workflow launching env
     export NXF_EXECUTOR_TES_ENDPOINT='http://back.end.com'
     
 
-Then you will be able to run your workflow over TES using the usual Nextflow command line, i.e.::
+It is important that the endpoint is specified without the trailing slash; otherwise, the resulting URLs will be not
+normalized and the requests to TES will fail.
 
-    nextflow run rnaseq-nf
+Then you will be able to run your workflow over TES using the usual Nextflow command line. Be sure to specify the Docker
+image to use, i.e.::
+
+    nextflow run rnaseq-nf -with-docker alpine
 
 .. note:: If the variable ``NXF_EXECUTOR_TES_ENDPOINT`` is omitted the default endpoint is ``http://localhost:8000``.
 
@@ -301,3 +360,32 @@ Then you will be able to run your workflow over TES using the usual Nextflow com
 * Automatic deployment of workflow scripts in the `bin` folder is not supported.
 * Process output directories are not supported. For details see `#76 <https://github.com/ga4gh/task-execution-schemas/issues/76>`_.
 * Glob patterns in process output declarations are not supported. For details see `#77 <https://github.com/ga4gh/task-execution-schemas/issues/77>`_.
+
+.. _oar-executor:
+
+OAR
+===
+
+The `OAR` executor allows you to run your pipeline script by using the `OAR <https://oar.imag.fr>`_ resource manager.
+
+Nextflow manages each process as a separate job that is submitted to the cluster by using the ``oarsub`` command.
+
+Being so, the pipeline must be launched from a node where the ``oarsub`` command is available, that is, in a common usage scenario, the cluster `head` node.
+
+To enable the `OAR` executor simply set to ``process.executor`` property to ``oar`` value in the ``nextflow.config`` file.
+
+The amount of resources requested by each job submission is defined by the following process directives:
+
+* :ref:`process-cpus`
+* :ref:`process-queue`
+* :ref:`process-time`
+* :ref:`process-memory`
+* :ref:`process-clusterOptions`
+
+**Known limitation**
+
+* `clusterOptions` should be given, if more than one, semicolon separated. It ensures the `OAR` batch script to be accurately formatted.
+
+```
+clusterOptions = '-t besteffort;--project myproject'
+```

@@ -49,11 +49,6 @@ class TaskPollingMonitor implements TaskMonitor {
     final Session session
 
     /**
-     * The tasks dispatcher
-     */
-    final TaskDispatcher dispatcher
-
-    /**
      * The time interval (in milliseconds) elapsed which execute a new poll
      */
     final long pollIntervalMillis
@@ -135,7 +130,6 @@ class TaskPollingMonitor implements TaskMonitor {
 
         this.name = params.name
         this.session = params.session as Session
-        this.dispatcher = session.dispatcher
         this.pollIntervalMillis = ( params.pollInterval as Duration ).toMillis()
         this.dumpInterval = (params.dumpInterval as Duration) ?: Duration.of('5min')
         this.capacity = (params.capacity ?: 0) as int
@@ -172,11 +166,6 @@ class TaskPollingMonitor implements TaskMonitor {
     protected Queue<TaskHandler> getRunningQueue() { runningQueue }
 
     /**
-     * @return The current {@link TaskDispatcher} instance
-     */
-    TaskDispatcher getDispatcher() { dispatcher }
-
-    /**
      * @return the current capacity value by the number of slots specified
      */
     int getCapacity() { capacity }
@@ -192,7 +181,7 @@ class TaskPollingMonitor implements TaskMonitor {
      *      by the polling monitor
      */
     protected boolean canSubmit(TaskHandler handler) {
-        capacity>0 ? runningQueue.size() < capacity : true
+        (capacity>0 ? runningQueue.size() < capacity : true) && handler.canForkProcess()
     }
 
     /**
@@ -236,6 +225,7 @@ class TaskPollingMonitor implements TaskMonitor {
         try{
             pendingQueue << handler
             taskAvail.signal()  // signal that a new task is available for execution
+            session.notifyTaskPending(handler)
             log.trace "Scheduled task > $handler"
         }
         finally {
@@ -280,7 +270,7 @@ class TaskPollingMonitor implements TaskMonitor {
      */
     @Override
     TaskMonitor start() {
-        log.debug ">>> barrier register (monitor: ${this.name})"
+        log.trace ">>> barrier register (monitor: ${this.name})"
         session.barrier.register(this)
 
         this.taskCompleteLock = new ReentrantLock()
@@ -302,7 +292,7 @@ class TaskPollingMonitor implements TaskMonitor {
                 pollLoop()
             }
             finally {
-                log.debug "<<< barrier arrives (monitor: ${this.name})"
+                log.trace "<<< barrier arrives (monitor: ${this.name})"
                 session.barrier.arrive(this)
             }
         }
@@ -377,7 +367,7 @@ class TaskPollingMonitor implements TaskMonitor {
     private void awaitSlots() {
         pendingLock.lock()
         try {
-            slotAvail.await()
+            slotAvail.await(1, TimeUnit.SECONDS)
         }
         finally {
             pendingLock.unlock()
@@ -429,12 +419,12 @@ class TaskPollingMonitor implements TaskMonitor {
 
             // dump this line every two minutes
             Throttle.after(dumpInterval) {
-                dumpPendingTasks()
+                dumpRunningQueue()
             }
         }
     }
 
-    protected void dumpPendingTasks() {
+    protected void dumpRunningQueue() {
 
         try {
             def pending = runningQueue.size()
@@ -444,7 +434,7 @@ class TaskPollingMonitor implements TaskMonitor {
             }
 
             def msg = []
-            msg << "!! executor $name > tasks to be completed: ${runningQueue.size()} -- pending tasks are shown below"
+            msg << "!! executor $name > tasks to be completed: ${runningQueue.size()} -- submitted tasks are shown below"
             // dump the first 10 tasks
             def i=0; def itr = runningQueue.iterator()
             while( i++<10 && itr.hasNext() )
@@ -565,6 +555,7 @@ class TaskPollingMonitor implements TaskMonitor {
 
                 if( session.isSuccess() ) {
                     itr.remove(); count++   // <-- remove the task in all cases
+                    handler.incProcessForks()
                     submit(handler)
                 }
                 else
@@ -611,14 +602,14 @@ class TaskPollingMonitor implements TaskMonitor {
         // check if it is terminated
         if( handler.checkIfCompleted() ) {
             log.debug "Task completed > $handler"
+            // decrement forks count
+            handler.decProcessForks()
 
             // since completed *remove* the task from the processing queue
             evict(handler)
 
             // finalize the tasks execution
             final fault = handler.task.processor.finalizeTask(handler.task)
-            // trigger the count down latch when it is a blocking task
-            handler.latch?.countDown()
 
             // notify task completion
             session.notifyTaskComplete(handler)
@@ -664,5 +655,13 @@ class TaskPollingMonitor implements TaskMonitor {
             log.debug "Failed to kill pending tasks ${batch} -- cause: ${e.message}"
         }
     }
+
+    /**
+     * The queue of tasks pending for submission to the underlying execution system
+     */
+    protected Queue<TaskHandler> getPendingQueue() {
+        return pendingQueue
+    }
+
 }
 

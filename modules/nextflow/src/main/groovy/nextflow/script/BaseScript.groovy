@@ -15,137 +15,192 @@
  */
 
 package nextflow.script
+
+import java.lang.reflect.InvocationTargetException
+import java.nio.file.Paths
+
 import groovy.transform.PackageScope
-import nextflow.Global
+import groovy.util.logging.Slf4j
+import nextflow.NF
+import nextflow.NextflowMeta
 import nextflow.Session
-import nextflow.processor.ProcessFactory
 import nextflow.processor.TaskProcessor
 /**
  * Any user defined script will extends this class, it provides the base execution context
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
-abstract class BaseScript extends Script {
+@Slf4j
+abstract class BaseScript extends Script implements ExecutionContext {
 
-    protected BaseScript() { }
+    private static Object[] EMPTY_ARGS = [] as Object[]
 
-    protected BaseScript(Binding binding) {
+    private Session session
+
+    private ProcessFactory processFactory
+
+    private TaskProcessor taskProcessor
+
+    private ScriptMeta meta
+
+    private WorkflowDef entryFlow
+
+    @Lazy InputStream stdin = { System.in }()
+
+    BaseScript() {
+        meta = ScriptMeta.register(this)
+    }
+
+    BaseScript(Binding binding) {
         super(binding)
+        meta = ScriptMeta.register(this)
     }
 
-    /**
-     * This method is get invoked by the DSL parser
-     * @param processNames
-     */
-    protected void init( List<String> processNames ) {
-        this.processNames = processNames
-    }
-
-    /*
-     * The script execution session, declare it private to prevent the user script to be able to access it
-     */
-    private Session sessionObj
-
-    /**
-     * The list of process defined in the pipeline script
-     */
-    private List<String> processNames
-
-    @PackageScope
-    void setSession( Session value )  {
-        sessionObj = value
-    }
-
-    private Session getSession() {
-        if( !sessionObj ) {
-            sessionObj = Global.session as Session
-        }
-        return sessionObj
-    }
-
-    @PackageScope
-    List<String> getProcessNames() {
-        processNames
+    @Override
+    ScriptBinding getBinding() {
+        (ScriptBinding)super.getBinding()
     }
 
     /**
      * Holds the configuration object which will used to execution the user tasks
      */
-    Map getConfig() { getSession().getConfig() }
+    protected Map getConfig() {
+        log.warn "The access of `config` object is deprecated"
+        session.getConfig()
+    }
 
-    @Lazy
-    InputStream stdin = { System.in }()
-
-    private TaskProcessor taskProcessor
-
-    /** Access to the last *process* object -- only for testing purpose */
+    /**
+     * Access to the last *process* object -- only for testing purpose
+     */
     @PackageScope
     TaskProcessor getTaskProcessor() { taskProcessor }
-
-    private result
-
-    /** Access to the last *process* result -- only for testing purpose */
-    @PackageScope
-    Object getResult() { result }
-
-    private ProcessFactory processFactory
-
-    private getProcessFactory() {
-        if( !processFactory ) {
-            processFactory = new ProcessFactory(this, getSession())
-        }
-        return processFactory
-    }
-
-    @PackageScope
-    void setProcessFactory( ProcessFactory value ) {
-        this.processFactory = value
-    }
 
     /**
      * Enable disable task 'echo' configuration property
      * @param value
      */
-    void echo(boolean value = true) {
-        config.process.echo = value
+    protected void echo(boolean value = true) {
+        log.warn "The use of `echo` method is deprecated"
+        session.getConfig().process.echo = value
     }
 
+    private void setup() {
+        binding.owner = this
+        session = binding.getSession()
+        processFactory = session.newProcessFactory(this)
+
+        binding.setVariable( 'baseDir', session.baseDir )
+        binding.setVariable( 'projectDir', session.baseDir )
+        binding.setVariable( 'workDir', session.workDir )
+        binding.setVariable( 'workflow', session.workflowMetadata )
+        binding.setVariable( 'nextflow', NextflowMeta.instance )
+        binding.setVariable('launchDir', Paths.get('./').toRealPath())
+        binding.setVariable('moduleDir', meta.scriptPath?.parent )
+    }
+
+    protected process( String name, Closure<BodyDef> body ) {
+        if( NF.isDsl2() ) {
+            def process = new ProcessDef(this,body,name)
+            meta.addDefinition(process)
+        }
+        else {
+            // legacy process definition an execution
+            taskProcessor = processFactory.createProcessor(name, body)
+            taskProcessor.run()
+        }
+    }
 
     /**
-     * Method to which is mapped the *process* declaration when using the following syntax:
-     *    <pre>
-     *        process myProcess( option: value[, [..]] ) &#123;
-     *        ..
-     *        &#125;
-     *    </pre>
+     * Workflow main entry point
      *
-     * @param args The process options specified in the parenthesis after the process name, as shown in the above example
-     * @param name The name of the process, e.g. {@code myProcess} in the above example
-     * @param body The body of the process declaration. It holds all the process definitions: inputs, outputs, code, etc.
+     * @param body The implementation body of the workflow
+     * @return The result of workflow execution
      */
-    protected process( Map<String,?> args, String name, Closure body ) {
-        // create the process
-        taskProcessor = getProcessFactory().createProcessor(name, body, args)
-        // launch it
-        result = taskProcessor.run()
+    protected workflow(Closure<BodyDef> workflowBody) {
+        if(!NF.isDsl2())
+            throw new IllegalStateException("Module feature not enabled -- Set `nextflow.preview.dsl=2` to allow the definition of workflow components")
+
+        // launch the execution
+        final workflow = new WorkflowDef(this, workflowBody)
+        if( !binding.entryName )
+            this.entryFlow = workflow
+        meta.addDefinition(workflow)
     }
 
-    /**
-     * Method to which is mapped the *process* declaration.
-     *
-     *    <pre>
-     *        process myProcess( option: value[, [..]] ) &#123;
-     *        ..
-     *        &#125;
-     *    </pre>
-     * @param name The name of the process, e.g. {@code myProcess} in the above example
-     * @param body The body of the process declaration. It holds all the process definitions: inputs, outputs, code, etc.
-     */
-    protected process( String name, Closure body ) {
-        // create the process
-        taskProcessor = getProcessFactory().createProcessor(name, body)
-        // launch it
-        result = taskProcessor.run()
+    protected workflow(String name, Closure<BodyDef> workflowDef) {
+        if(!NF.isDsl2())
+            throw new IllegalStateException("Module feature not enabled -- Set `nextflow.preview.dsl=2` to allow the definition of workflow components")
+
+        final workflow = new WorkflowDef(this,workflowDef,name)
+        if( binding.entryName==name )
+            this.entryFlow = workflow
+        meta.addDefinition(workflow)
     }
+
+    protected IncludeDef include( IncludeDef include ) {
+        if(!NF.isDsl2())
+            throw new IllegalStateException("Module feature not enabled -- Set `nextflow.preview.dsl=2` to import module files")
+
+        include .setSession(session)
+    }
+
+    @Override
+    Object invokeMethod(String name, Object args) {
+        if(NF.isDsl2())
+            binding.invokeMethod(name, args)
+        else
+            super.invokeMethod(name, args)
+    }
+
+    private runDsl1() {
+        session.notifyBeforeWorkflowExecution()
+        final ret = runScript()
+        session.notifyAfterWorkflowExecution()
+        return ret
+    }
+
+    private runDsl2() {
+        final result = runScript()
+        if( meta.isModule() ) {
+            return result
+        }
+
+        if( binding.entryName && !entryFlow ) {
+            def msg = "Unknown workflow entry name: ${binding.entryName}"
+            final allNames = meta.getLocalWorkflowNames()
+            final guess = allNames.closest(binding.entryName)
+            if( guess )
+                msg += " -- Did you mean?\n" + guess.collect { "  $it"}.join('\n')
+            throw new IllegalArgumentException(msg)
+        }
+
+        if( !entryFlow ) {
+            log.debug "No entry workflow defined"
+            return result
+        }
+
+        // invoke the entry workflow
+        session.notifyBeforeWorkflowExecution()
+        final ret = entryFlow.invoke_a(EMPTY_ARGS)
+        session.notifyAfterWorkflowExecution()
+        return ret
+    }
+
+    Object run() {
+        setup()
+        ExecutionStack.push(this)
+        try {
+            NF.dsl2 ? runDsl2() : runDsl1()
+        }
+        catch(InvocationTargetException e) {
+            // provide the exception cause which is more informative than InvocationTargetException
+            throw(e.cause ?: e)
+        }
+        finally {
+            ExecutionStack.pop()
+        }
+    }
+
+    protected abstract Object runScript()
 
 }

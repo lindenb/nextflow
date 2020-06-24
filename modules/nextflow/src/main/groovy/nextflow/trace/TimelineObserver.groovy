@@ -37,7 +37,7 @@ import org.apache.commons.lang.StringEscapeUtils
 @CompileStatic
 class TimelineObserver implements TraceObserver {
 
-    static final String DEF_FILE_NAME = 'timeline.html'
+    public static final String DEF_FILE_NAME = 'timeline.html'
 
     /**
      * Holds the the start time for tasks started/submitted but not yet completed
@@ -66,7 +66,7 @@ class TimelineObserver implements TraceObserver {
      * "rolled" to a new file
      */
     @Override
-    void onFlowStart(Session session) {
+    void onFlowCreate(Session session) {
         beginMillis = startMillis = System.currentTimeMillis()
     }
 
@@ -127,6 +127,11 @@ class TimelineObserver implements TraceObserver {
 
     @Override
     void onProcessCached(TaskHandler handler, TraceRecord trace) {
+
+        // event was triggered by a stored task, ignore it
+        if( trace == null ) {
+            return
+        }
 
         // remove the record from the current records
         synchronized (records) {

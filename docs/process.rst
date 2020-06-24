@@ -258,9 +258,6 @@ The template script can contain any piece of code that can be executed by the un
 Shell
 -----
 
-.. warning:: This is an incubating feature. It may change in future Nextflow releases.
-
-
 The ``shell`` block is a string statement that defines the *shell* command executed by the process to carry out its task.
 It is an alternative to the :ref:`process-script` definition with an important difference, it uses
 the exclamation mark ``!`` character as the variable placeholder for Nextflow variables in place of the usual dollar character.
@@ -359,8 +356,9 @@ val         Lets you access the received input value by its name in the process 
 env         Lets you use the received value to set an environment variable named
             as the specified input name.
 file        Lets you handle the received value as a file, staging it properly in the execution context.
+path        Lets you handle the received value as a path, staging the file properly in the execution context.
 stdin       Lets you forward the received value to the process `stdin` special file.
-set         Lets you handle a group of input values having one of the above qualifiers.
+tuple       Lets you handle a group of input values having one of the above qualifiers.
 each        Lets you execute the process for each entry in the input collection.
 =========== =============
 
@@ -580,6 +578,57 @@ with the current execution context.
   This guarantees that input files with the same name won't overwrite each other.
 
 
+Input of type 'path'
+--------------------
+
+The ``path`` input qualifier was introduced by Nextflow version 19.10.0 and it's a drop-in replacement
+for the ``file`` qualifier, therefore it's backward compatible with the syntax
+and the semantic for the input ``file`` described above.
+
+The important difference between ``file`` and ``path`` qualifier is that the first expects the
+values received as input to be *file* objects. When inputs is a different type, it automatically
+coverts to a string and saves it to a temporary files. This can be useful in some uses cases,
+but it turned out to be tricky in most common cases.
+
+The ``path`` qualifier instead interprets string values as the path location of the input file
+and automatically converts to a file object.
+
+::
+
+    process foo {
+      input:
+        path x from '/some/data/file.txt'
+      """
+        your_command --in $x
+      """
+    }
+
+
+.. note::
+    Provided input value should represent an absolute path location i.e. the string value
+    **must** be prefixed with a `/` character or with a supported URI protocol i.e. ``file://``,
+    ``http://``, ``s3://``, etc. and it cannot contains special characters (e.g. ``\n``, etc.).
+
+
+
+The option ``stageAs`` allow you to control how the file should be named in the task work
+directory, providing a specific name or a name pattern as described in the `Multiple input files`_
+section::
+
+
+    process foo {
+      input:
+        path x, stageAs: 'data.txt' from '/some/data/file.txt'
+      """
+        your_command --in data.txt
+      """
+    }
+
+
+.. tip::
+    The ``path`` qualifier should be preferred over ``file`` to handle process input files
+    when using Nextflow 19.10.0 or later.
+
 
 Input of type 'stdin'
 ---------------------
@@ -641,15 +690,22 @@ on the value received from the channel. For example::
 Input of type 'set'
 -------------------
 
-The ``set`` qualifier allows you to group multiple parameters in a single parameter definition. It can be useful
+.. warning:: The `set` input type has been deprecated. See `tuple` instead.
+
+
+Input of type 'tuple'
+---------------------
+
+
+The ``tuple`` qualifier allows you to group multiple parameters in a single parameter definition. It can be useful
 when a process receives, in input, tuples of values that need to be handled separately. Each element in the tuple
-is associated to a corresponding element with the ``set`` definition. For example::
+is associated to a corresponding element with the ``tuple`` definition. For example::
 
-     tuple = Channel.from( [1, 'alpha'], [2, 'beta'], [3, 'delta'] )
+     values = Channel.of( [1, 'alpha'], [2, 'beta'], [3, 'delta'] )
 
-     process setExample {
+     process tupleExample {
          input:
-         set val(x), file('latin.txt')  from tuple
+         tuple val(x), file('latin.txt') from values
 
          """
          echo Processing $x
@@ -659,10 +715,10 @@ is associated to a corresponding element with the ``set`` definition. For exampl
      }
 
 
-In the above example the ``set`` parameter is used to define the value ``x`` and the file ``latin.txt``,
+In the above example the ``tuple`` parameter is used to define the value ``x`` and the file ``latin.txt``,
 which will receive a value from the same channel.
 
-In the ``set`` declaration items can be defined by using the following qualifiers: ``val``, ``env``, ``file`` and ``stdin``.
+In the ``tuple`` declaration items can be defined by using the following qualifiers: ``val``, ``env``, ``file`` and ``stdin``.
 
 A shorter notation can be used by applying the following substitution rules:
 
@@ -679,17 +735,16 @@ env(x)          (not supported)
 
 Thus the previous example could be rewritten as follows::
 
-      tuple = Channel.from( [1, 'alpha'], [2, 'beta'], [3, 'delta'] )
+      values = Channel.of( [1, 'alpha'], [2, 'beta'], [3, 'delta'] )
 
-      process setExample {
+      process tupleExample {
           input:
-          set x, 'latin.txt' from tuple
+          tuple x, 'latin.txt' from values
 
           """
           echo Processing $x
           cat - latin.txt > copy
           """
-
       }
 
 File names can be defined in *dynamic* manner as explained in the `Dynamic input file names`_ section.
@@ -848,8 +903,10 @@ Qualifier   Semantic
 =========== =============
 val         Sends variable's with the name specified over the output channel.
 file        Sends a file produced by the process with the name specified over the output channel.
+path        Sends a file produced by the process with the name specified over the output channel (replaces ``file``).
+env         Sends the variable defined in the process environment with the name specified over the output channel.
 stdout      Sends the executed process `stdout` over the output channel.
-set         Lets to send multiple values over the same output channel.
+tuple       Lets to send multiple values over the same output channel.
 =========== =============
 
 
@@ -975,12 +1032,11 @@ Some caveats on glob pattern behavior:
    Instead, use a prefix or a postfix naming notation to restrict the set of matching files to
    only the expected ones e.g. ``file 'prefix_*.sorted.bam'``. 
 
-.. tip::
-    By default all the files matching the specified glob pattern are emitted by the channel as a sole (list) item.
-    It is also possible to emit each file as a sole item by adding the ``mode flatten`` attribute in the output file
-    declaration.
+By default all the files matching the specified glob pattern are emitted by the channel as a sole (list) item.
+It is also possible to emit each file as a sole item by adding the ``mode flatten`` attribute in the output file
+declaration.
 
-By using the `mode` attribute the previous example can be re-written as show below::
+By using the ``mode`` attribute the previous example can be re-written as show below::
 
     process splitLetters {
 
@@ -995,6 +1051,9 @@ By using the `mode` attribute the previous example can be re-written as show bel
     letters .subscribe { println "File: ${it.name} => ${it.text}" }
 
 
+.. warning::
+    The option ``mode`` is deprecated as of version 19.10.0. Use the operator :ref:`operator-collect`
+    in the downstream process instead.
 
 Read more about glob syntax at the following link `What is a glob?`_
 
@@ -1027,38 +1086,91 @@ For example::
 In the above example, each time the process is executed an alignment file is produced whose name depends
 on the actual value of the ``x`` input.
 
-.. tip:: The management of output files is a very common misunderstanding when using Nextflow. 
+.. tip:: The management of output files is a very common misunderstanding when using Nextflow.
   With other tools, it is generally necessary to organize the outputs files into some kind of directory 
   structure or to guarantee a unique file name scheme, so that result files won't overwrite each other 
   and that they can be referenced univocally by downstream tasks.
 
   With Nextflow, in most cases, you don't need to take care of naming output files, because each task is executed 
   in its own unique temporary directory, so files produced by different tasks can never override each other.
-  Also meta-data can be associated with outputs by using the :ref:`set output <process-set>` qualifier, instead of
+  Also meta-data can be associated with outputs by using the :ref:`tuple output <process-out-tuple>` qualifier, instead of
   including them in the output file name.
 
   To sum up, the use of output files with static names over dynamic ones is preferable whenever possible, 
   because it will result in a simpler and more portable code.
 
+.. _process-out-path:
+
+Output path
+-----------
+
+The ``path`` output qualifier was introduced by Nextflow version 19.10.0 and it's a drop-in replacement
+for the ``file`` output qualifier, therefore it's backward compatible with the syntax
+and the semantic for the input ``file`` described above.
+
+The main advantage of ``path`` over the ``file`` qualifier is that it allows the specification
+of a number of output to fine-control the output files.
+
+============== =====================
+Name            Description
+============== =====================
+glob            When ``true`` the specified name is interpreted as a glob pattern (default: ``true``)
+hidden          When ``true`` hidden files are included in the matching output files (default: ``false``)
+followLinks     When ``true`` target files are return in place of any matching symlink (default: ``true``)
+type            Type of paths returned, either ``file``, ``dir`` or ``any`` (default: ``any``, or ``file`` if the specified file name pattern contains a `**` - double star - symbol)
+maxDepth        Maximum number of directory levels to visit (default: `no limit`)
+includeInputs   When ``true`` any input files matching an output file glob pattern are included.
+============== =====================
+
+
+.. warning::
+    Breaking change: the ``file`` qualifier interprets ``:`` as path separator, therefore ``file 'foo:bar'``
+    captures both files ``foo`` and ``bar``. The ``path`` qualifier interprets it just a plain file name character,
+    and therefore the output definition ``path 'foo:bar'`` captures the output file with name ``foo:bar``.
+
+
+.. tip::
+    The ``path`` qualifier should be preferred over ``file`` to handle process output files
+    when using Nextflow 19.10.0 or later.
 
 .. _process-stdout:
 
 Output 'stdout' special file
 ----------------------------
 
-The ``stdout`` qualifier allows to `capture` the `stdout` output of the executed process and send it over
+The ``stdout`` qualifier allows you to `capture` the `stdout` output of the executed process and send it over
 the channel specified in the output parameter declaration. For example::
 
     process echoSomething {
         output:
         stdout channel
 
-        "echo Hello world!"
-
+        """
+        echo Hello world!
+        """
     }
 
     channel.subscribe { print "I say..  $it" }
 
+
+.. _process-env:
+
+Output 'env'
+------------
+
+The ``env`` qualifier allows you to capture a variable defined in the process execution environment
+and send it over the channel specified in the output parameter declaration::
+
+    process myTask {
+        output:
+        env FOO into target
+        script:
+        '''
+        FOO=$(ls -la)
+        '''
+    }
+
+    target.view { "directory content: $it" }
 
 
 .. _process-set:
@@ -1066,25 +1178,34 @@ the channel specified in the output parameter declaration. For example::
 Output 'set' of values
 ----------------------
 
-The ``set`` qualifier allows to send multiple values into a single channel. This feature is useful
+.. warning:: The `set` output type has been deprecated. See `tuple` instead.
+
+
+.. _process-out-tuple:
+
+Output 'tuple' of values
+------------------------
+
+The ``tuple`` qualifier allows to send multiple values into a single channel. This feature is useful
 when you need to `group together` the results of multiple executions of the same process, as shown in the following
 example::
 
-    query = Channel.fromPath '*.fa'
-    species = Channel.from 'human', 'cow', 'horse'
+    query_ch = Channel.fromPath '*.fa'
+    species_ch = Channel.from 'human', 'cow', 'horse'
 
     process blast {
 
     input:
-        val species
-        file query
+      val species from query_ch
+      file query from species_ch
 
     output:
-        set val(species), file('result') into blastOuts
+      tuple val(species), file('result') into blastOuts
 
-
-    "blast -db nr -query $query" > result
-
+    script:
+      """
+      blast -db nr -query $query > result
+      """
     }
 
 
@@ -1092,15 +1213,15 @@ In the above example a `BLAST` task is executed for each pair of ``species`` and
 When the task completes a new tuple containing the value for ``species`` and the file ``result`` is sent to the ``blastOuts`` channel.
 
 
-A `set` declaration can contain any combination of the following qualifiers, previously described: ``val``, ``file`` and ``stdout``.
+A `tuple` declaration can contain any combination of the following qualifiers, previously described: ``val``, ``file`` and ``stdout``.
 
 .. tip:: Variable identifiers are interpreted as `values` while strings literals are interpreted as `files` by default,
-  thus the above output `set` can be rewritten using a short notation as shown below.
+  thus the above output `tuple` can be rewritten using a short notation as shown below.
 
 ::
 
     output:
-        set species, 'result' into blastOuts
+        tuple species, 'result' into blastOuts
 
 
 
@@ -1161,6 +1282,7 @@ Some directives are generally available to all processes, some others depends on
 
 The directives are:
 
+* `accelerator`_
 * `afterScript`_
 * `beforeScript`_
 * `cache`_
@@ -1175,6 +1297,7 @@ The directives are:
 * `executor`_
 * `ext`_
 * `label`_
+* `machineType`_
 * `maxErrors`_
 * `maxForks`_
 * `maxRetries`_
@@ -1191,6 +1314,35 @@ The directives are:
 * `tag`_
 * `time`_
 * `validExitStatus`_
+
+
+
+accelerator
+-----------
+
+The ``accelerator`` directive allows you to specify the hardware accelerator requirement for the task execution
+e.g. *GPU* processor. For example::
+
+    process foo {
+        accelerator 4, type: 'nvidia-tesla-k80'
+
+        script:
+        """
+        your_gpu_enabled --command --line
+        """
+    }
+
+
+The above examples will request 4 GPUs of type `nvidia-tesla-k80`.
+
+
+.. note:: This directive is only supported by :ref:`awsbatch-executor`, :ref:`google-lifesciences-executor` and :ref:`k8s-executor` executors.
+
+.. tip:: The accelerator ``type`` option value depends by the target execution platform. Refer to the target
+  platform documentation for details on the available accelerators. `AWS <https://aws.amazon.com/batch/faqs/?#GPU_Scheduling_>`_
+  `Google <https://cloud.google.com/compute/docs/gpus/>`_
+  `Kubernetes <https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/#clusters-containing-different-types-of-gpus>`_.
+
 
 afterScript
 -----------
@@ -1368,8 +1520,8 @@ You can use it to request non-standard resources or use settings that are specif
 out of the box by Nextflow.
 
 .. note:: This directive is taken in account only when using a grid based executor:
-  :ref:`sge-executor`, :ref:`lsf-executor`, :ref:`slurm-executor`, :ref:`pbs-executor` and
-  :ref:`condor-executor` executors.
+  :ref:`sge-executor`, :ref:`lsf-executor`, :ref:`slurm-executor`, :ref:`pbs-executor`, :ref:`pbspro-executor`,
+  :ref:`moab-executor` and :ref:`condor-executor` executors.
 
 .. _process-disk:
 
@@ -1479,6 +1631,12 @@ returning an error condition. For example::
 
 The number of times a failing process is re-executed is defined by the `maxRetries`_ and `maxErrors`_ directives.
 
+.. note:: More complex strategies depending on the task exit status
+  or other parametric values can be defined using a dynamic ``errorStrategy``
+  directive. See the `Dynamic directives`_ section for details.
+
+See also: `maxErrors`_, `maxRetries`_ and `Dynamic computing resources`_.
+
 .. _process-executor:
 
 executor
@@ -1499,6 +1657,8 @@ Name                   Executor
 ``lsf``                The process is executed using the `Platform LSF <http://en.wikipedia.org/wiki/Platform_LSF>`_ job scheduler.
 ``slurm``              The process is executed using the SLURM job scheduler.
 ``pbs``                The process is executed using the `PBS/Torque <http://en.wikipedia.org/wiki/Portable_Batch_System>`_ job scheduler.
+``pbspro``             The process is executed using the `PBS Pro <https://www.pbsworks.com/>`_ job scheduler.
+``moab``               The process is executed using the `Moab <http://www.adaptivecomputing.com/moab-hpc-basic-edition/>`_ job scheduler.
 ``condor``             The process is executed using the `HTCondor <https://research.cs.wisc.edu/htcondor/>`_ job scheduler.
 ``nqsii``              The process is executed using the `NQSII <https://www.rz.uni-kiel.de/en/our-portfolio/hiperf/nec-linux-cluster>`_ job scheduler.
 ``ignite``             The process is executed using the `Apache Ignite <https://ignite.apache.org/>`_ cluster.
@@ -1549,6 +1709,27 @@ This can be defined in the ``nextflow.config`` file as shown below::
     process.ext.version = '2.5.3'
 
 
+.. _process-machineType:
+
+machineType
+-----------
+
+The ``machineType`` can be used to specify a predefined Google Compute Platform `machine type <https://cloud.google.com/compute/docs/machine-types>`_
+when running using the :ref:`Google Pipeline <google-pipelines>` executor.
+
+This directive is optional and if specified overrides the cpus and memory directives::
+
+    process foo {
+      machineType 'n1-highmem-8'
+
+      """
+      <your script here>
+      """
+    }
+
+.. note:: This feature requires Nextflow 19.07.0 or later.
+    
+See also: `cpus`_ and `memory`_.
 
 .. _process-maxErrors:
 
@@ -1741,6 +1922,7 @@ The ``pod`` directive allows the definition of the following options:
 
 ================================================= =================================================
 ``label: <K>, value: <V>``                        Defines a pod label with key ``K`` and value ``V``.
+``annotation: <K>, value: <V>``                   Defines a pod annotation with key ``K`` and value ``V``.
 ``env: <E>, value: <V>``                          Defines an environment variable with name ``E`` and whose value is given by the ``V`` string.
 ``env: <E>, config: <C/K>``                       Defines an environment variable with name ``E`` and whose value is given by the entry associated to the key with name ``K`` in the `ConfigMap <https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/>`_ with name ``C``.
 ``env: <E>, secret: <S/K>``                       Defines an environment variable with name ``E`` and whose value is given by the entry associated to the key with name ``K`` in the `Secret <https://kubernetes.io/docs/concepts/configuration/secret/>`_ with name ``S``.
@@ -1812,6 +1994,7 @@ saveAs          A closure which, given the name of the file being published, ret
                 a custom strategy.
                 Return the value ``null`` from the closure to *not* publish a file.
                 This is useful when the process has multiple output files, but you want to publish only some of them.
+enabled         Allow to enable or disable the publish rule depending the boolean value specified (default: ``true``).
 =============== =================
 
 Table of publish modes:
@@ -2128,6 +2311,9 @@ See also: `cpus`_, `memory`_, `queue`_ and `Dynamic computing resources`_.
 validExitStatus
 ---------------
 
+.. warning::
+    This feature has been deprecated and will be removed in a future release.
+
 A process is terminated when the executed command returns an error exit status. By default any error status
 other than ``0`` is interpreted as an error condition.
 
@@ -2149,7 +2335,6 @@ You can specify a single value or multiple values as shown in the following exam
 In the above example, although the command script ends with a ``1`` exit status, the process
 will not return an error condition because the value ``1`` is declared as a `valid` status in
 the ``validExitStatus`` directive.
-
 
 
 Dynamic directives
@@ -2220,7 +2405,7 @@ of a process failure and try to re-execute it using a higher limit. For example:
         memory { 2.GB * task.attempt }
         time { 1.hour * task.attempt }
 
-        errorStrategy { task.exitStatus == 140 ? 'retry' : 'terminate' }
+        errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
         maxRetries 3
 
         script:
@@ -2233,7 +2418,24 @@ In the above example the `memory`_ and execution `time`_ limits are defined dyna
 is executed the ``task.attempt`` is set to ``1``, thus it will request a two GB of memory and one hour of maximum execution
 time.
 
-If the task execution fail reporting an exit status equals ``140``, the task is re-submitted (otherwise terminates immediately).
+If the task execution fail reporting an exit status in the range between 137 and 140, the task is re-submitted (otherwise terminates immediately).
 This time the value of ``task.attempt`` is ``2``, thus increasing the amount of the memory to four GB and the time to 2 hours, and so on.
 
 The directive `maxRetries`_ set the maximum number of time the same task can be re-executed.
+
+Dynamic Retry with backoff
+--------------------------
+
+There are cases in which the required execution resources may be temporary unavailable e.g.
+network congestion. In these cases immediately re-executing the task will likely result in
+the identical error. A retry with an exponential backoff delay can better recover these error
+conditions::
+
+    process foo {
+      errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+      maxRetries 5
+      script:
+      '''
+      your_command --here
+      '''
+    }

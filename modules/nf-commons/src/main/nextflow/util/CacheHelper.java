@@ -20,8 +20,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.ProviderMismatchException;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -31,6 +33,7 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
+import nextflow.extension.Bolts;
 import nextflow.extension.FilesEx;
 import nextflow.file.FileHolder;
 import org.slf4j.Logger;
@@ -73,6 +76,13 @@ public class CacheHelper {
     private static int HASH_BITS = DEFAULT_HASHING.bits();
 
     private static int HASH_BYTES = HASH_BITS / 8;
+
+    private static final Map<String,Object> FIRST_ONLY;
+
+    static {
+        FIRST_ONLY = new HashMap<>(1);
+        FIRST_ONLY.put("firstOnly", Boolean.TRUE);
+    }
 
     public static HashFunction defaultHasher() {
         return DEFAULT_HASHING;
@@ -135,10 +145,17 @@ public class CacheHelper {
             return hasher;
         }
 
-        if( value instanceof Map) {
+        if( value instanceof Map ) {
             // note: should map be order invariant as Set ?
             for( Object item : ((Map)value).values() )
                 hasher = CacheHelper.hasher( hasher, item, mode );
+            return hasher;
+        }
+
+        if( value instanceof Map.Entry ) {
+            Map.Entry entry = (Map.Entry)value;
+            hasher = CacheHelper.hasher( hasher, entry.getKey(), mode );
+            hasher = CacheHelper.hasher( hasher, entry.getValue(), mode );
             return hasher;
         }
 
@@ -169,7 +186,11 @@ public class CacheHelper {
             return hasher.putInt( value.hashCode() );
         }
 
-        log.debug("[WARN] Unknown hashing type: {} -- {}", value.getClass(), value);
+        if( value instanceof CacheFunnel ) {
+            return ((CacheFunnel) value).funnel(hasher,mode);
+        }
+
+        Bolts.debug1(log, FIRST_ONLY, "[WARN] Unknown hashing type: "+value.getClass());
         return hasher.putInt( value.hashCode() );
     }
 
@@ -204,6 +225,10 @@ public class CacheHelper {
         }
         catch(IOException e) {
             log.debug("Unable to get file attributes file: {} -- Cause: {}", FilesEx.toUriString(path), e.toString());
+        }
+        catch(ProviderMismatchException e) {
+            // see https://github.com/nextflow-io/nextflow/pull/1382
+            log.warn("File system is unable to get file attributes file: {} -- Cause: {}", FilesEx.toUriString(path), e.toString());
         }
 
         if( mode==HashMode.DEEP && attrs!=null && attrs.isRegularFile() )

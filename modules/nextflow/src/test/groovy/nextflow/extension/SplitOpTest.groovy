@@ -96,7 +96,7 @@ class SplitOpTest extends Specification {
         def METHOD = 'splitFastq'
         def SOURCE = Mock(DataflowReadChannel)
         def params = [:]
-        def op = Spy(SplitOp, constructorArgs:[SOURCE, METHOD, params])
+        SplitOp op = Spy(SplitOp, constructorArgs:[SOURCE, METHOD, params])
 
         def splitter = Mock(FastqSplitter)
         def OUTPUT = Mock(DataflowWriteChannel)
@@ -104,7 +104,7 @@ class SplitOpTest extends Specification {
         when:
         op.apply()
         then:
-        1 * op.getOrCreateDataflowQueue([autoClose:false]) >> OUTPUT
+        1 * op.getOrCreateWriteChannel([autoClose:false]) >> OUTPUT
         1 * op.createSplitter(METHOD, [autoClose: false, into:OUTPUT]) >> splitter
         1 * op.applySplittingOperator(SOURCE, OUTPUT, splitter)
         0 * splitter.setMultiSplit(_) >> null
@@ -117,8 +117,10 @@ class SplitOpTest extends Specification {
         def METHOD = 'splitFastq'
         def SOURCE = Mock(DataflowReadChannel)
         def params = [pe:true]
-        def op = Spy(SplitOp, constructorArgs:[SOURCE, METHOD, params])
+        SplitOp op = Spy(SplitOp, constructorArgs:[SOURCE, METHOD, params])
 
+        def target1 = Mock(FakeDataflowQueue)
+        def target2 = Mock(FakeDataflowQueue)
         def copy1 = Mock(FakeDataflowQueue)
         def copy2 = Mock(FakeDataflowQueue)
         def out1 = Mock(DataflowWriteChannel)
@@ -131,12 +133,14 @@ class SplitOpTest extends Specification {
         then:
         1 * op.splitMultiEntries()
         1 * op.createSourceCopies(SOURCE,2) >> [copy1, copy2]
+        1 * op.createInto0() >> target1
+        1 * op.createInto0() >> target2
 
-        1 * op.splitSingleEntry(copy1, [elem:-1, autoClose: false])
-        1 * op.splitSingleEntry(copy2, [elem:-2, autoClose: false])
+        1 * op.splitSingleEntry(copy1, [elem:-1, autoClose: false, into:target1])
+        1 * op.splitSingleEntry(copy2, [elem:-2, autoClose: false, into:target2])
 
-        1 * op.getOrCreateDataflowQueue( _ as Map ) >> out1
-        1 * op.getOrCreateDataflowQueue( _ as Map ) >> out2
+        1 * op.getOrCreateWriteChannel( _ as Map ) >> out1
+        1 * op.getOrCreateWriteChannel( _ as Map ) >> out2
 
         1 * op.createSplitter(METHOD, [elem:-1, autoClose: false, into:out1] ) >> splitter1
         1 * op.createSplitter(METHOD, [elem:-2, autoClose: false, into:out2] ) >> splitter2

@@ -20,10 +20,11 @@ include 'my-capsule'
 include 'nextflow'
 include 'nf-commons'
 include 'nf-console'
-include 'nf-ignite'
 include 'nf-httpfs'
 include 'nf-ga4gh'
+include 'nf-amazon'
 include 'nf-google'
+include 'nf-tower'
 
 rootProject.children.each { prj ->
     prj.projectDir = new File("$rootDir/modules/$prj.name")

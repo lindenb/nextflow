@@ -16,23 +16,45 @@
 
 package nextflow.script
 
-import nextflow.util.ReadOnlyMap
 import spock.lang.Specification
+
+import java.nio.file.Paths
+
+import nextflow.Session
+import nextflow.util.ReadOnlyMap
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 class ScriptBindingTest extends Specification {
 
+    def 'should return context variables' () {
+        given:
+        def session = Mock(Session)
+        def path = Paths.get('/foo/bar')
 
-    def 'test params' () {
+        when:
+        def binding = new ScriptBinding()
+                .setSession(session)
+                .setScriptPath(path)
 
-        setup:
-        def bindings = new ScriptBinding(env: [HOME:'/this/path'])
+        then:
+        binding.scriptPath == path
+        binding.session == session
+    }
+
+    def 'should test params' () {
+
+        given:
+        def session = Mock(Session)
+        session.getConfigEnv() >> [HOME:'/this/path']
+        def bindings = new ScriptBinding()
+
+        when:
+        bindings.setSession(session)
         bindings.setParams( [field1: 1, field2: 'dos'] )
         bindings.setArgs(['a','b','c'])
 
-        when:
         // set a generic value
         bindings.setVariable('variable_x', 99)
 
@@ -50,6 +72,8 @@ class ScriptBindingTest extends Specification {
 
         // note: BUT it fallback on the local environment
         bindings.getVariable('HOME') == '/this/path'
+        
+        bindings.getVariables().keySet() == ['args','params','variable_x'] as Set
 
     }
 
@@ -143,6 +167,34 @@ class ScriptBindingTest extends Specification {
         map['field-1'] == null
         map['field2']  == 2
         map['Field2']  == 3
+
+    }
+
+    def 'should copy with overriding values' () {
+        when:
+        def map = new ScriptBinding.ParamsMap()
+        map['alpha'] = 0
+        map['alpha'] = 1
+        map['delta'] = 2
+        map['gamma'] = 3
+        then:
+        map.alpha == 0
+        map.delta == 2
+        map.gamma == 3
+
+        when:
+        def copy = map.copyWith(foo:1, omega: 9)
+        then:
+        copy.foo == 1
+        copy.delta == 2
+        copy.gamma == 3
+        copy.omega == 9
+        and:
+        // source does not change
+        map.alpha == 0
+        map.delta == 2
+        map.gamma == 3
+        !map.containsKey('omega')
 
     }
 

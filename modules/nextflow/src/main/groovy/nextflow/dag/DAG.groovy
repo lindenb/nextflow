@@ -16,24 +16,29 @@
 
 package nextflow.dag
 
+import groovy.transform.MapConstructor
 import groovy.transform.PackageScope
 import groovy.transform.ToString
 import groovy.util.logging.Slf4j
-import groovyx.gpars.dataflow.DataflowChannel
+import groovyx.gpars.dataflow.DataflowBroadcast
+import groovyx.gpars.dataflow.DataflowQueue
+import groovyx.gpars.dataflow.DataflowReadChannel
+import groovyx.gpars.dataflow.DataflowWriteChannel
 import groovyx.gpars.dataflow.expression.DataflowExpression
 import groovyx.gpars.dataflow.operator.DataflowProcessor
-import nextflow.Session
+import nextflow.NF
+import nextflow.extension.CH
 import nextflow.extension.DataflowHelper
 import nextflow.processor.TaskProcessor
-import nextflow.script.DefaultInParam
-import nextflow.script.DefaultOutParam
-import nextflow.script.EachInParam
-import nextflow.script.InParam
-import nextflow.script.InputsList
-import nextflow.script.OutParam
-import nextflow.script.OutputsList
-import nextflow.script.SetInParam
-import nextflow.script.SetOutParam
+import nextflow.script.params.DefaultInParam
+import nextflow.script.params.DefaultOutParam
+import nextflow.script.params.EachInParam
+import nextflow.script.params.InParam
+import nextflow.script.params.InputsList
+import nextflow.script.params.OutParam
+import nextflow.script.params.OutputsList
+import nextflow.script.params.TupleInParam
+import nextflow.script.params.TupleOutParam
 /**
  * Model a direct acyclic graph of the pipeline execution.
  *
@@ -59,11 +64,6 @@ class DAG {
      * The ordered list of vertices
      */
     private List<Vertex> vertices = new ArrayList<>(50)
-
-    /**
-     * The {@link Session} to which this DAG is bound
-     */
-    private Session session
 
     @PackageScope
     List<Vertex> getVertices() { vertices }
@@ -94,7 +94,7 @@ class DAG {
      * @param inputs The operator input(s). It can be either a single channel or a list of channels.
      * @param outputs The operator output(s). It can be either a single channel, a list of channels or {@code null} if the operator has no output.
      */
-    public void addOperatorNode( String label, inputs, outputs, List<DataflowProcessor> operators=null )  {
+    void addOperatorNode( String label, inputs, outputs, List<DataflowProcessor> operators=null )  {
         assert label
         assert inputs
         addVertex(Type.OPERATOR, label, normalizeChannels(inputs), normalizeChannels(outputs), operators )
@@ -125,11 +125,11 @@ class DAG {
 
         final vertex = createVertex( type, label, extra )
 
-        inbounds?.each { ChannelHandler channel ->
+        for( ChannelHandler channel : inbounds ) {
             inbound( vertex, channel )
         }
 
-        outbounds?.each { ChannelHandler channel ->
+        for( ChannelHandler channel : outbounds ) {
             outbound( vertex, channel )
         }
     }
@@ -173,7 +173,7 @@ class DAG {
         }
         // handle the special case for dataflow variable
         // this kind of channel can be used more than one time as an input
-        else if( entering.channel instanceof DataflowExpression ) {
+        else if( isForkable(entering.channel) ) {
             if( !edge.from ) {
                 edge.from = new Vertex(Type.ORIGIN);
                 int p = vertices.indexOf(edge.to)
@@ -189,6 +189,14 @@ class DAG {
             final name = getChannelName(entering)
             throw new MultipleInputChannelException(name, vertex, edge.to)
         }
+    }
+
+    private boolean isForkable(obj) {
+        if( obj instanceof DataflowExpression )
+            return true
+        if( obj instanceof DataflowBroadcast )
+            return true
+        return obj instanceof DataflowQueue && CH.isBridge(obj)
     }
 
     private void outbound( Vertex vertex, ChannelHandler leaving) {
@@ -214,12 +222,12 @@ class DAG {
 
         inputs
                 .findAll { !( it instanceof DefaultInParam)  }
-                .collect { InParam p -> new ChannelHandler(channel: (DataflowChannel)p.inChannel, label: inputName0(p)) }
+                .collect { InParam p -> new ChannelHandler(channel: p.rawChannel, label: inputName0(p)) }
 
     }
 
     static private String inputName0(InParam param) {
-        if( param instanceof SetInParam ) return null
+        if( param instanceof TupleInParam ) return null
         if( param instanceof EachInParam ) return null
         return param.name
     }
@@ -227,10 +235,10 @@ class DAG {
     static private List<ChannelHandler> normalizeOutputs( OutputsList outputs ) {
 
         def result = []
-        outputs.each { OutParam p ->
-            if( p instanceof DefaultOutParam ) return
-            p.outChannels.each {
-                result << new ChannelHandler(channel: (DataflowChannel)it, label: p instanceof SetOutParam ? null : p.name)
+        for(OutParam p :outputs) {
+            if( p instanceof DefaultOutParam ) break
+            for(Object it : p.outChannels) {
+                result << new ChannelHandler(channel: it, label: p instanceof TupleOutParam ? null : p.name)
             }
         }
 
@@ -241,11 +249,11 @@ class DAG {
         if( entry == null ) {
             Collections.emptyList()
         }
-        else if( entry instanceof DataflowChannel ) {
+        else if( entry instanceof DataflowReadChannel || entry instanceof DataflowWriteChannel ) {
             [ new ChannelHandler(channel: entry) ]
         }
         else if( entry instanceof Collection || entry instanceof Object[] ) {
-            entry.collect { new ChannelHandler(channel: (DataflowChannel)it) }
+            entry.collect { new ChannelHandler(channel: it) }
         }
         else {
             throw new IllegalArgumentException("Not a valid channel type: [${entry.class.name}]")
@@ -253,7 +261,7 @@ class DAG {
     }
 
     @PackageScope
-    Edge findEdge( DataflowChannel channel ) {
+    Edge findEdge( channel ) {
         edges.find { edge -> edge.channel.is(channel) }
     }
 
@@ -283,32 +291,32 @@ class DAG {
     }
 
     @PackageScope
-    void resolveEdgeNames(Map map) {
-        edges.each { Edge edge ->
-            def name = resolveChannelName(map, edge.channel)
-            if( name ) edge.label = name
+    void resolveEdgeNames() {
+        for( Edge edge : edges ) {
+            final name = lookupVariable(edge.channel)
+            if( name )
+                edge.label = name
         }
     }
 
+    @PackageScope String lookupVariable(obj) {
+        NF.lookupVariable(obj)
+    }
 
     @PackageScope
-    String resolveChannelName( Map map, DataflowChannel channel ) {
+    String resolveChannelName( Map map, channel ) {
         def entry = map.find { k,v -> v.is channel }
         return entry ? entry.key : null
     }
 
     @PackageScope
     String getChannelName( ChannelHandler handler ) {
-        def result = handler.label
-        result ?: (session ? resolveChannelName( session.getBinding().getVariables(), handler.channel ) : null )
+        NF.lookupVariable(handler.channel) ?: handler.label
     }
 
     void normalize() {
         normalizeMissingVertices()
-        if( session )
-            resolveEdgeNames(session.getBinding().getVariables())
-        else
-            log.debug "Missing session object -- Cannot normalize edge names"
+        resolveEdgeNames()
     }
 
     /**
@@ -406,12 +414,13 @@ class DAG {
      */
     @PackageScope
     @ToString(includeNames = true, includes = 'label,from,to', includePackage=false)
+    @MapConstructor
     class Edge {
 
         /**
-         * The {@link groovyx.gpars.dataflow.DataflowChannel} that originated this graph edge
+         * The Dataflow channel that originated this graph edge
          */
-        DataflowChannel channel
+        Object channel
 
         /**
          * The vertex *from* where the edge starts
@@ -439,7 +448,7 @@ class DAG {
         /**
          * The {@link groovyx.gpars.dataflow.DataflowChannel} that originated this graph edge
          */
-        DataflowChannel channel
+        Object channel
 
         /**
          * The edge label

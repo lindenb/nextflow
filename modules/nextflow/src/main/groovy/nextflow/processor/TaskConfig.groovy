@@ -21,11 +21,11 @@ import static nextflow.processor.TaskProcessor.*
 import java.nio.file.Path
 
 import groovy.transform.CompileStatic
-import groovy.transform.PackageScope
 import nextflow.Const
 import nextflow.exception.AbortOperationException
 import nextflow.exception.FailedGuardException
 import nextflow.executor.BashWrapperBuilder
+import nextflow.executor.res.AcceleratorResource
 import nextflow.k8s.model.PodOptions
 import nextflow.script.TaskClosure
 import nextflow.util.CmdLineHelper
@@ -39,7 +39,9 @@ import nextflow.util.MemoryUnit
 @CompileStatic
 class TaskConfig extends LazyMap implements Cloneable {
 
-    private transient Map cache = [:]
+    static private final List<Integer> EXIT_ZERO = [0]
+
+    private transient Map cache = new LinkedHashMap(20)
 
     TaskConfig() {  }
 
@@ -132,9 +134,7 @@ class TaskConfig extends LazyMap implements Cloneable {
         }
     }
 
-
-    @PackageScope
-    boolean isDynamic() {
+    protected boolean isDynamic() {
         if( super.isDynamic() )
             return true
 
@@ -166,7 +166,7 @@ class TaskConfig extends LazyMap implements Cloneable {
         if( result != null )
             return [result as Integer]
 
-        return [0]
+        return EXIT_ZERO
     }
 
     ErrorStrategy getErrorStrategy() {
@@ -236,6 +236,10 @@ class TaskConfig extends LazyMap implements Cloneable {
         catch( Exception e ) {
             throw new AbortOperationException("Not a valid `time` value in process definition: $value")
         }
+    }
+
+    boolean hasCpus() {
+        get('cpus') != null
     }
 
     int getCpus() {
@@ -347,6 +351,31 @@ class TaskConfig extends LazyMap implements Cloneable {
 
     PodOptions getPodOptions() {
         new PodOptions((List)get('pod'))
+    }
+
+    AcceleratorResource getAccelerator() {
+        final value = get('accelerator')
+        if( value instanceof Number )
+            return new AcceleratorResource(value)
+        if( value instanceof Map )
+            return new AcceleratorResource(value)
+        if( value != null )
+            throw new IllegalArgumentException("Invalid `accelerator` directive value: $value [${value.getClass().getName()}]")
+        return null
+    }
+
+    String getMachineType() {
+        return get('machineType')
+    }
+
+    String getContainerOptions() {
+        def opts = get('containerOptions')
+        return opts instanceof CharSequence ? opts.toString() : null
+    }
+
+    Map getContainerOptionsMap() {
+        def opts = get('containerOptions')
+        return opts instanceof Map ? opts : Collections.emptyMap()
     }
 
     /**
@@ -499,7 +528,7 @@ class LazyMap implements Map<String,Object> {
         }
 
         else if( value instanceof GString ) {
-            return value.cloneWith(getBinding()).toString()
+            return value.cloneAsLazy(getBinding()).toString()
         }
 
         return value

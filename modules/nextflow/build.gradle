@@ -14,13 +14,13 @@ compileGroovy {
 }
 
 dependencies {
-    compile(project(':nf-commons'))
-    compile(project(':nf-httpfs'))
-    compile "org.codehaus.groovy:groovy:2.5.6"
-    compile "org.codehaus.groovy:groovy-nio:2.5.6"
-    compile "org.codehaus.groovy:groovy-xml:2.5.6"
-    compile "org.codehaus.groovy:groovy-json:2.5.6"
-    compile "org.codehaus.groovy:groovy-templates:2.5.6"
+    compile project(':nf-commons')
+    compile project(':nf-httpfs')
+    compile "org.codehaus.groovy:groovy:2.5.11"
+    compile "org.codehaus.groovy:groovy-nio:2.5.11"
+    compile "org.codehaus.groovy:groovy-xml:2.5.11"
+    compile "org.codehaus.groovy:groovy-json:2.5.11"
+    compile "org.codehaus.groovy:groovy-templates:2.5.11"
     compile "org.slf4j:jcl-over-slf4j:1.7.25"
     compile "org.slf4j:jul-to-slf4j:1.7.25"
     compile "org.slf4j:log4j-over-slf4j:1.7.25"
@@ -29,20 +29,22 @@ dependencies {
     compile "org.codehaus.gpars:gpars:1.2.1"
     compile("ch.grengine:grengine:1.3.0") { exclude group: 'org.codehaus.groovy'  }
     compile "commons-lang:commons-lang:2.6"
+    compile "commons-codec:commons-codec:1.10"
     compile "com.beust:jcommander:1.35"
     compile("com.esotericsoftware.kryo:kryo:2.24.0") { exclude group: 'com.esotericsoftware.minlog', module: 'minlog' }
-    compile('org.iq80.leveldb:leveldb:0.10')
+    compile('org.iq80.leveldb:leveldb:0.12')
     compile('org.eclipse.jgit:org.eclipse.jgit:5.2.1.201812262042-r')
-    compile('io.nextflow:nxf-s3fs:1.0.5') {
-        exclude group: 'org.apache.tika', module: 'tika-core'
-        exclude group: 'com.amazonaws', module: 'aws-java-sdk-s3'
-    }
-    compile ('com.amazonaws:aws-java-sdk-s3:1.11.470')
-    compile ('com.amazonaws:aws-java-sdk-ec2:1.11.470')
-    compile ('com.amazonaws:aws-java-sdk-batch:1.11.470')
     compile ('javax.activation:activation:1.1.1')
     compile ('javax.mail:mail:1.4.7')
     compile ('org.yaml:snakeyaml:1.18')
     compile ('org.jsoup:jsoup:1.11.2')
     compile 'jline:jline:2.9'
+
+    testCompile 'org.subethamail:subethasmtp:3.1.7'
+}
+
+
+test {
+    minHeapSize = "512m"
+    maxHeapSize = "2048m"
 }

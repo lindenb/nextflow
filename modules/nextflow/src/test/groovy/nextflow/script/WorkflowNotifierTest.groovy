@@ -17,7 +17,11 @@
 package nextflow.script
 
 import java.nio.file.Paths
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
+import nextflow.NextflowMeta
 import nextflow.mail.Attachment
 import nextflow.mail.Mail
 import nextflow.mail.Mailer
@@ -37,14 +41,14 @@ class WorkflowNotifierTest extends Specification {
         given:
         def work = TestHelper.createInMemTempDir()
         def sessionId = UUID.randomUUID()
-        def now = new Date(1513285947928)
-        def end = new Date( now.time + 150_000 )
+        def now = OffsetDateTime.ofInstant(Instant.ofEpochMilli(1513285947928), ZoneId.systemDefault())
+        def end = now.plusSeconds(150)
         def meta = new WorkflowMetadata(
                 runName: 'foo_bartali',
                 exitStatus: 0,
                 start: now,
                 complete: end,
-                duration: Duration.of( end.time - now.time ),
+                duration: Duration.between( now, end ),
                 commandLine: 'nextflow run big-workflow',
                 launchDir: Paths.get('/launch/dir'),
                 workDir: work,
@@ -59,8 +63,8 @@ class WorkflowNotifierTest extends Specification {
                 profile: 'my-cluster',
                 container: 'image/foo:tag',
                 containerEngine: 'docker',
-                nextflow: [version: '0.27.0', build: 333, timestamp: '2017-12-12'],
-                stats: new WorkflowStats(succeedMillis: 4_000_000, succeedCount: 10, failedCount: 20, cachedCount: 30, ignoredCount: 0)
+                nextflow: new NextflowMeta('0.27.0', 333, '2017-12-12'),
+                stats: new WorkflowStats(succeedMillis: 4_000_000, succeededCount: 10, failedCount: 20, cachedCount: 30, ignoredCount: 0)
         )
 
         def notifier = new WorkflowNotifier(variables: [workflow:meta], config: [:])
@@ -162,8 +166,8 @@ class WorkflowNotifierTest extends Specification {
 
         given:
         def sessionId = UUID.randomUUID()
-        def now = new Date(1513285947928)
-        def end = new Date( now.time + 150_000 )
+        def now = OffsetDateTime.ofInstant(Instant.ofEpochMilli(1513285947928), ZoneId.systemDefault())
+        def end = now.plusSeconds(150)
         def workDir = TestHelper.createInMemTempDir()
 
         def meta = new WorkflowMetadata(
@@ -171,7 +175,7 @@ class WorkflowNotifierTest extends Specification {
                 exitStatus: 0,
                 start: now,
                 complete: end,
-                duration: Duration.of( end.time - now.time ),
+                duration: Duration.between( now, end ),
                 commandLine: 'nextflow run big-workflow',
                 launchDir: Paths.get('/launch/dir'),
                 workDir: workDir,
@@ -186,7 +190,7 @@ class WorkflowNotifierTest extends Specification {
                 profile: 'my-cluster',
                 container: 'image/foo:tag',
                 containerEngine: 'docker',
-                nextflow: [version: '0.27.0', build: 333, timestamp: '2017-12-12'],
+                nextflow: new NextflowMeta('0.27.0', 333, '2017-12-12'),
                 stats: new WorkflowStats(succeedMillis: 4000)
         )
 

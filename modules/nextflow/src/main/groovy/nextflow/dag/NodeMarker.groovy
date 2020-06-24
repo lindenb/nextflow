@@ -20,8 +20,8 @@ import groovyx.gpars.dataflow.operator.DataflowProcessor
 import nextflow.Global
 import nextflow.Session
 import nextflow.processor.TaskProcessor
-import nextflow.script.InputsList
-import nextflow.script.OutputsList
+import nextflow.script.params.InputsList
+import nextflow.script.params.OutputsList
 /**
  * Helper class to mark DAG node with the proper labels
  *
@@ -30,7 +30,7 @@ import nextflow.script.OutputsList
 @CompileStatic
 class NodeMarker {
 
-    static private List<DataflowProcessor> operators = []
+    static private List<DataflowProcessor> operators = new ArrayList<>(10)
 
     static void appendOperator( DataflowProcessor p ) {
         operators.add(p)
@@ -58,8 +58,10 @@ class NodeMarker {
      * @param outputs The operator output(s). It can be either a single channel, a list of channels or {@code null} if the operator has no output.
      */
     static void addOperatorNode( String name, inputs, outputs )  {
-        if( session && session.dag && !session.aborted )
-            session.dag.addOperatorNode(name, inputs, outputs, operators)
+        if( session && session.dag && !session.aborted ) {
+            session.dag.addOperatorNode(name, inputs, outputs, new ArrayList<DataflowProcessor>(operators))
+            operators.clear()
+        }
     }
 
     /**

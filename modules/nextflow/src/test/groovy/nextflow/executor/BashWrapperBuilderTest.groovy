@@ -16,21 +16,18 @@
 
 package nextflow.executor
 
-import spock.lang.Specification
-import spock.lang.Unroll
-
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
 import nextflow.Session
-import nextflow.cloud.aws.batch.AwsOptions
 import nextflow.container.ContainerConfig
 import nextflow.container.DockerBuilder
 import nextflow.container.SingularityBuilder
 import nextflow.processor.TaskBean
 import nextflow.util.MustacheTemplateEngine
-
+import spock.lang.Specification
+import spock.lang.Unroll
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -170,30 +167,6 @@ class BashWrapperBuilderTest extends Specification {
         folder?.deleteDir()
     }
 
-    def 'should resolve foreign files' () {
-
-        given:
-        def INPUTS = [
-                'foo.txt': Paths.get('/some/foo.txt'),
-                'bar.txt': Paths.get('/some/bar.txt'),
-        ]
-
-        def RESOLVED = [
-                'foo.txt': Paths.get('/some/foo.txt'),
-                'BAR.txt': Paths.get('/some/BAR.txt'),
-        ]
-        def bean = Mock(TaskBean)
-        bean.getInputFiles() >> INPUTS
-        def copy = Mock(SimpleFileCopyStrategy)
-        def bash = Spy(BashWrapperBuilder, constructorArgs:[bean, copy])
-
-        when:
-        def files = bash.getResolvedInputs()
-        then:
-        1 * copy.resolveForeignFiles(INPUTS) >> RESOLVED
-        files == RESOLVED
-
-    }
 
     def 'should create module command' () {
         given:
@@ -220,7 +193,7 @@ class BashWrapperBuilderTest extends Specification {
         bash.getStatsEnabled() >> false
         bash.getStageInMode() >> 'symlink'
 
-        bash.getResolvedInputs() >> [:]
+        bash.getInputFiles() >> [:]
         bash.getContainerConfig() >> [engine: 'singularity', envWhitelist: 'FOO,BAR']
         bash.getContainerImage() >> 'foo/bar'
         bash.getContainerMount() >> null
@@ -247,7 +220,7 @@ class BashWrapperBuilderTest extends Specification {
         bash.createContainerBuilder(null)
         then:
         bash.createContainerBuilder0('docker') >> BUILDER
-        bash.getResolvedInputs() >> INPUTS
+        bash.getInputFiles() >> INPUTS
         bash.getStageInMode() >> null
         1 * BUILDER.addMountForInputs(INPUTS) >> null
 
@@ -460,7 +433,10 @@ class BashWrapperBuilderTest extends Specification {
         then:
         binding.containsKey('task_env')
         binding.containsKey('container_env')
-        binding.task_env == 'export FOO="aa"\nexport BAR="bb"\n'
+        binding.task_env == /\
+                export FOO="aa"
+                export BAR="bb"
+                /.stripIndent()
         binding.container_env == null
 
         when:
@@ -469,14 +445,14 @@ class BashWrapperBuilderTest extends Specification {
         binding.containsKey('task_env')
         binding.containsKey('container_env')
         binding.task_env == null
-        binding.container_env == '''\
+        binding.container_env == /\
                 nxf_container_env() {
                 cat << EOF
                 export FOO="aa"
                 export BAR="bb"
                 EOF
                 }
-                '''.stripIndent()
+                /.stripIndent()
         binding.launch_cmd.contains('nxf_container_env')
 
         when:
@@ -607,7 +583,7 @@ class BashWrapperBuilderTest extends Specification {
         then:
         binding.conda_activate == '''\
                 # conda environment
-                source activate /some/conda/env/foo
+                source $(conda info --json | awk '/conda_prefix/ { gsub(/"|,/, "", $2); print $2 }')/bin/activate /some/conda/env/foo
                 '''.stripIndent()
 
     }
@@ -736,13 +712,33 @@ class BashWrapperBuilderTest extends Specification {
                 containerConfig: [enabled: true, engine: 'shifter'] as ContainerConfig ).makeBinding()
 
         then:
-        binding.container_helpers.contains('shifter_pull')
         binding.launch_cmd == '''\
-                shifter_pull docker:ubuntu:latest
-                shifter --image docker:ubuntu:latest /bin/bash -c "eval $(nxf_container_env); /bin/bash -ue /work/dir/.command.sh"
-                '''.stripIndent().rightTrim()
-        binding.kill_cmd == null
+        shifterimg pull docker:ubuntu:latest
+        shifterimg lookup docker:ubuntu:latest
+        while ! shifterimg lookup docker:ubuntu:latest; do
+            sleep 5
+            STATUS=$(shifterimg -v pull docker:ubuntu:latest | tail -n2 | head -n1 | awk \'{print $6}\')
+            [[ $STATUS == "FAILURE" || -z $STATUS ]] && echo "Shifter failed to pull image \'docker:ubuntu:latest\'" >&2  && exit 1
+        done
+        shifter --image docker:ubuntu:latest /bin/bash -c "eval $(nxf_container_env); /bin/bash -ue /work/dir/.command.sh"
+        '''.stripIndent().rightTrim()
         binding.cleanup_cmd == ""
+        binding.kill_cmd == '[[ "$pid" ]] && kill $pid 2>/dev/null'
+
+    }
+
+    def 'should create wrapper with singularity'() {
+        when:
+        def binding = newBashWrapperBuilder(
+                containerEnabled: true,
+                containerImage: 'docker:ubuntu:latest',
+                environment: [PATH: '/path/to/bin:$PATH', FOO: 'xxx'],
+                containerConfig: [enabled: true, engine: 'singularity'] as ContainerConfig ).makeBinding()
+
+        then:
+        binding.launch_cmd == 'set +u; env - PATH="$PATH" SINGULARITYENV_TMP="$TMP" SINGULARITYENV_TMPDIR="$TMPDIR" singularity exec docker:ubuntu:latest /bin/bash -c "cd $PWD; eval $(nxf_container_env); /bin/bash -ue /work/dir/.command.sh"'
+        binding.cleanup_cmd == ""
+        binding.kill_cmd == '[[ "$pid" ]] && kill $pid 2>/dev/null'
 
     }
 
@@ -823,91 +819,49 @@ class BashWrapperBuilderTest extends Specification {
         binding.containsKey('after_script')
     }
 
-    def 'should include s3 helpers' () {
+
+    def 'should get output env capture snippet' () {
         given:
-        def folder = Paths.get('/work/dir')
-        def target = Mock(Path)
-        target.toString() >> '/some/bucket'
+        def builder = new BashWrapperBuilder()
 
-        def bean = new TaskBean([
-                name: 'Hello 1',
-                workDir: folder,
-                targetDir: target,
-                scratch: true,
-                outputFiles: ['test.bam','test.bai'],
-                script: 'echo Hello world!',
-        ])
-
-        def copy = Spy(SimpleFileCopyStrategy, constructorArgs:[bean])
-        copy.getPathScheme(target) >> 's3'
-        copy.getAwsOptions() >> new AwsOptions()
-
-        /*
-         * simple bash run
-         */
         when:
-        def binding = new BashWrapperBuilder(bean,copy).makeBinding()
+        def str = builder.getOutputEnvCaptureSnippet(['FOO','BAR'])
         then:
-        binding.unstage_outputs == '''\
-                  nxf_s3_upload 'test.bam' s3://some/bucket || true
-                  nxf_s3_upload 'test.bai' s3://some/bucket || true
-                  '''.stripIndent().rightTrim()
+        str == '''
+            # capture process environment
+            set +u
+            echo FOO=$FOO > .command.env
+            echo BAR=$BAR >> .command.env
+            '''
+            .stripIndent()
 
-        binding.helpers_script == '''\
-            # aws helper
-            nxf_s3_upload() {
-                local pattern=$1
-                local s3path=$2
-                IFS=$'\\n\'
-                for name in $(eval "ls -1d $pattern");do
-                  if [[ -d "$name" ]]; then
-                    aws s3 cp --only-show-errors --recursive --storage-class STANDARD "$name" "$s3path/$name"
-                  else
-                    aws s3 cp --only-show-errors --storage-class STANDARD "$name" "$s3path/$name"
-                  fi
-                done
-                unset IFS
-            }
-            
-            nxf_s3_download() {
-                local source=$1
-                local target=$2
-                local file_name=$(basename $1)
-                local is_dir=$(aws s3 ls $source | grep -F "PRE ${file_name}/" -c)
-                if [[ $is_dir == 1 ]]; then
-                    aws s3 cp --only-show-errors --recursive "$source" "$target"
-                else 
-                    aws s3 cp --only-show-errors "$source" "$target"
-                fi
-            }
-            
-            nxf_parallel() {
-                local cmd=("$@")
-                local cpus=$(nproc 2>/dev/null || < /proc/cpuinfo grep '^process' -c)
-                local max=$(if (( cpus>16 )); then echo 16; else echo $cpus; fi)
-                local i=0
-                local pid=()
-                (
-                set +u
-                while ((i<${#cmd[@]})); do
-                    local copy=()
-                    for x in "${pid[@]}"; do
-                      [[ -e /proc/$x ]] && copy+=($x) 
-                    done
-                    pid=("${copy[@]}")
-            
-                    if ((${#pid[@]}>=$max)); then 
-                      sleep 1 
-                    else 
-                      eval "${cmd[$i]}" &
-                      pid+=($!)
-                      ((i+=1))
-                    fi 
-                done
-                ((${#pid[@]}>0)) && wait ${pid[@]}
-                )
-            }
-            
-            '''.stripIndent()
+    }
+
+    def 'should validate bash interpreter' () {
+        given:
+        def builder = new BashWrapperBuilder()
+        expect:
+        builder.isBash('/bin/bash')
+        builder.isBash('/usr/bin/bash')
+        builder.isBash('/bin/env bash')
+        builder.isBash('/bin/bash -eu')
+        !builder.isBash('/bin/env perl')
+
+    }
+
+    def 'should get stage and unstage commands' () {
+
+        when:
+        def builder = newBashWrapperBuilder()
+        then:
+        builder.getStageCommand() == 'nxf_stage'
+        builder.getUnstageCommand() == 'nxf_unstage'
+
+        when:
+        def binding = builder.makeBinding()
+        then:
+        binding.stage_cmd == 'nxf_stage'
+        binding.unstage_cmd == 'nxf_unstage'
+        
     }
 }

@@ -17,6 +17,7 @@
 package nextflow.cli
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.regex.Pattern
 
 import com.beust.jcommander.DynamicParameter
 import com.beust.jcommander.IStringConverter
@@ -27,15 +28,18 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import groovyx.gpars.GParsConfig
 import nextflow.Const
+import nextflow.NextflowMeta
 import nextflow.config.ConfigBuilder
 import nextflow.exception.AbortOperationException
 import nextflow.file.FileHelper
 import nextflow.scm.AssetManager
 import nextflow.script.ScriptFile
 import nextflow.script.ScriptRunner
+import nextflow.util.ConfigHelper
 import nextflow.util.CustomPoolFactory
 import nextflow.util.Duration
 import nextflow.util.HistoryFile
+import nextflow.util.SecretHelper
 import org.yaml.snakeyaml.Yaml
 /**
  * CLI sub-command RUN
@@ -47,6 +51,7 @@ import org.yaml.snakeyaml.Yaml
 @Parameters(commandDescription = "Execute a pipeline project")
 class CmdRun extends CmdBase implements HubOptions {
 
+    static final Pattern RUN_NAME_PATTERN = Pattern.compile(/^[a-z](?:[a-z\d]|[-_](?=[a-z\d])){0,79}$/, Pattern.CASE_INSENSITIVE)
 
     static List<String> VALID_PARAMS_FILE = ['json', 'yml', 'yaml']
 
@@ -73,7 +78,7 @@ class CmdRun extends CmdBase implements HubOptions {
     String libPath
 
     @Parameter(names=['-cache'], description = 'Enable/disable processes caching', arity = 1)
-    boolean cacheable = true
+    Boolean cacheable
 
     @Parameter(names=['-resume'], description = 'Execute the script using the cached results, useful to continue executions that was stopped by an error')
     String resume
@@ -130,14 +135,17 @@ class CmdRun extends CmdBase implements HubOptions {
     boolean stdin
 
     @Parameter(names = ['-ansi'], hidden = true, arity = 0)
-    boolean setAnsi(boolean value) {
+    void setAnsi(boolean value) {
         launcher.options.ansiLog = value
     }
 
     @Parameter(names = ['-ansi-log'], description = 'Enable/disable ANSI console logging', arity = 1)
-    boolean setAnsiLog(boolean value) {
+    void setAnsiLog(boolean value) {
         launcher.options.ansiLog = value
     }
+
+    @Parameter(names = ['-with-tower'], description = 'Monitor workflow execution with Seqera Tower service')
+    String withTower
 
     @Parameter(names = ['-with-weblog'], description = 'Send workflow status messages via HTTP to target URL')
     String withWebLog
@@ -153,6 +161,12 @@ class CmdRun extends CmdBase implements HubOptions {
 
     @Parameter(names = '-with-singularity', description = 'Enable process execution in a Singularity container')
     def withSingularity
+
+    @Parameter(names = '-with-podman', description = 'Enable process execution in a Podman container')
+    def withPodman
+
+    @Parameter(names = '-without-podman', description = 'Disable process execution in a Podman container')
+    def withoutPodman
 
     @Parameter(names = '-with-docker', description = 'Enable process execution in a Docker container')
     def withDocker
@@ -195,6 +209,12 @@ class CmdRun extends CmdBase implements HubOptions {
     @Parameter(names=['-offline'], description = 'Do not check for remote project updates')
     boolean offline = System.getenv('NXF_OFFLINE') as boolean
 
+    @Parameter(names=['-entry'], description = 'Entry workflow name to be executed', arity = 1)
+    String entryName
+
+    @Parameter(names=['-dsl2'], hidden = true)
+    boolean dsl2
+
     @Override
     String getName() { NAME }
 
@@ -205,12 +225,18 @@ class CmdRun extends CmdBase implements HubOptions {
         if( !pipeline )
             throw new AbortOperationException("No project name was specified")
 
+        if( withPodman && withoutPodman )
+            throw new AbortOperationException("Command line options `-with-podman` and `-without-podman` cannot be specified at the same time")
+
         if( withDocker && withoutDocker )
             throw new AbortOperationException("Command line options `-with-docker` and `-without-docker` cannot be specified at the same time")
 
         if( offline && latest )
             throw new AbortOperationException("Command line options `-latest` and `-offline` cannot be specified at the same time")
 
+        if( dsl2 )
+            NextflowMeta.instance.enableDsl2()
+        
         checkRunName()
 
         log.info "N E X T F L O W  ~  version ${Const.APP_VER}"
@@ -226,9 +252,11 @@ class CmdRun extends CmdBase implements HubOptions {
 
         // -- create a new runner instance
         final runner = new ScriptRunner(config)
-        runner.script = scriptFile
-        runner.profile = profile
+        runner.setScript(scriptFile)
+        runner.session.profile = profile
+        runner.session.commandLine = launcher.cliString
         runner.session.ansiLog = launcher.options.ansiLog
+        runner.session.resolvedConfig = resolveConfig(scriptFile.parent)
 
         if( this.test ) {
             runner.test(this.test, scriptArgs)
@@ -242,12 +270,14 @@ class CmdRun extends CmdBase implements HubOptions {
         runner.verifyAndTrackHistory(launcher.cliString, runName)
 
         // -- run it!
-        runner.execute(scriptArgs)
+        runner.execute(scriptArgs, this.entryName)
     }
 
     protected void checkRunName() {
         if( runName == 'last' )
             throw new AbortOperationException("Not a valid run name: `last`")
+        if( runName && !matchRunName(runName) )
+            throw new AbortOperationException("Not a valid run name: `$runName` -- It must match the pattern $RUN_NAME_PATTERN")
 
         if( !runName ) {
             // -- make sure the generated name does not exist already
@@ -256,6 +286,10 @@ class CmdRun extends CmdBase implements HubOptions {
 
         else if( HistoryFile.DEFAULT.checkExistsByName(runName) )
             throw new AbortOperationException("Run name `$runName` has been already used -- Specify a different one")
+    }
+
+    static protected boolean matchRunName(String name) {
+        RUN_NAME_PATTERN.matcher(name).matches()
     }
 
     protected ScriptFile getScriptFile(String pipelineName) {
@@ -364,7 +398,7 @@ class CmdRun extends CmdBase implements HubOptions {
         return result
     }
 
-    static private parseParam( String str ) {
+    static protected parseParam( String str ) {
 
         if ( str == null ) return null
 
@@ -411,5 +445,24 @@ class CmdRun extends CmdBase implements HubOptions {
             throw new AbortOperationException("Cannot parse params file: $file", e)
         }
     }
+
+    protected String resolveConfig(Path baseDir) {
+
+        if( !withTower )
+            return null
+
+        final config = new ConfigBuilder()
+                .setShowClosures(true)
+                .setOptions(launcher.options)
+                .setCmdRun(this)
+                .setBaseDir(baseDir)
+                .buildConfigObject()
+
+        // strip secret
+        SecretHelper.hideSecrets(config)
+
+        ConfigHelper.toCanonicalString(config, false)
+    }
+
 
 }

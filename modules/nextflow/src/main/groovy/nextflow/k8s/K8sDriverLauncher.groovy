@@ -79,6 +79,12 @@ class K8sDriverLauncher {
     private Map config
 
     /**
+     * Name of the config map used to propagate the nextflow
+     * setting in the container
+     */
+    private String configMapName
+
+    /**
      * Kubernetes specific config settings
      */
     private K8sConfig k8sConfig
@@ -86,6 +92,11 @@ class K8sDriverLauncher {
     private String paramsFile
 
     private boolean interactive
+
+    /**
+     * Runs in background mode
+     */
+    private boolean background
 
     /**
      * Workflow script positional parameters
@@ -103,6 +114,8 @@ class K8sDriverLauncher {
         this.args = args
         this.pipelineName = name
         this.interactive = name == 'login'
+        if( background && interactive )
+            throw new AbortOperationException("Option -bg conflicts with interactive mode")
         this.config = makeConfig(pipelineName)
         this.k8sConfig = makeK8sConfig(config)
         this.k8sClient = makeK8sClient(k8sConfig)
@@ -110,7 +123,63 @@ class K8sDriverLauncher {
         createK8sConfigMap()
         createK8sLauncherPod()
         waitPodStart()
-        interactive ? launchLogin() : printK8sPodOutput()
+        // login into container session
+        if( interactive )
+            launchLogin()
+        // dump pod output
+        else if( !background )
+            printK8sPodOutput()
+        else
+            log.debug "Nextflow driver launched in background mode -- pod: $runName"
+    }
+
+    int shutdown() {
+        if( background )
+            return 0
+        // fetch the container exit status
+        final exitCode = waitPodTermination()
+        // cleanup the config map if OK
+        def deleteOnSuccessByDefault = exitCode==0
+        if( k8sConfig.getCleanup(deleteOnSuccessByDefault)  ) {
+            deleteConfigMap()
+        }
+        return exitCode
+    }
+
+    protected boolean isWaitTimedOut(long time) {
+        System.currentTimeMillis()-time > 90_000
+    }
+
+    protected int waitPodTermination() {
+        log.debug "Wait for pod termination name=$runName"
+        final rnd = new Random()
+        final time = System.currentTimeMillis()
+        Map state = null
+        try {
+            while( true ) {
+                sleep rnd.nextInt(500)
+                state = k8sClient.podState(runName)
+                if( state?.terminated instanceof Map  )
+                    return state.terminated.exitCode as int
+
+                else if( isWaitTimedOut(time) )
+                    throw new IllegalStateException('Timeout waiting for pod terminated state='+state)
+            }
+        }
+        catch( Exception e ) {
+            log.warn "Unable to fetch pod exit status -- pod=$runName state=$state"
+            return 127
+        }
+    }
+
+    protected void deleteConfigMap() {
+        try {
+            k8sClient.configDelete(configMapName)
+            log.debug "Deleted K8s configMap with name: $configMapName"
+        }
+        catch ( Exception e ) {
+            log.warn "Unable to delete configMap: $configMapName", e
+        }
     }
 
     protected void waitPodStart() {
@@ -247,7 +316,7 @@ class K8sDriverLauncher {
 
         if( !config.libDir )
             config.remove('libDir')
-        
+
         final result = config.toMap()
         log.trace "K8s config object:\n${ConfigHelper.toCanonicalString(result).indent('  ')}"
         return result
@@ -403,6 +472,7 @@ class K8sDriverLauncher {
             .withEnv( PodEnv.value('NXF_WORK', k8sConfig.getWorkDir()) )
             .withEnv( PodEnv.value('NXF_ASSETS', k8sConfig.getProjectDir()) )
             .withEnv( PodEnv.value('NXF_EXECUTOR', 'k8s'))
+            .withEnv( PodEnv.value('NXF_ANSI_LOG', 'false'))
             .build()
 
         // note: do *not* set the work directory because it may need to be created  by the init script
@@ -463,9 +533,10 @@ class K8sDriverLauncher {
         }
 
         // create the config map
-        final name = makeConfigMapName(configMap)
-        tryCreateConfigMap(name, configMap)
-        k8sConfig.getPodOptions().getMountConfigMaps().add( new PodMountConfig(name, '/etc/nextflow') )
+        configMapName = makeConfigMapName(configMap)
+        tryCreateConfigMap(configMapName, configMap)
+        log.debug "Created K8s configMap with name: $configMapName"
+        k8sConfig.getPodOptions().getMountConfigMaps().add( new PodMountConfig(configMapName, '/etc/nextflow') )
     }
 
     protected void tryCreateConfigMap(String name, Map data) {

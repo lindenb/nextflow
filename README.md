@@ -4,8 +4,9 @@
 <br>[Henri E. Bal , Jennifer G. Steiner , Andrew S. Tanenbaum](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.145.7873)
 
 
-[![Chat on Gitter](https://img.shields.io/gitter/room/nextflow-io/nextflow.svg?colorB=26af64&style=popout)](https://gitter.im/nextflow-io/nextflow)
+![Nextflow CI](https://github.com/nextflow-io/nextflow/workflows/Nextflow%20CI/badge.svg)
 [![Nextflow version](https://img.shields.io/github/release/nextflow-io/nextflow.svg?colorB=26af64&style=popout)](https://github.com/nextflow-io/nextflow/releases/latest)
+[![Chat on Gitter](https://img.shields.io/gitter/room/nextflow-io/nextflow.svg?colorB=26af64&style=popout)](https://gitter.im/nextflow-io/nextflow)
 [![Nextflow Twitter](https://img.shields.io/twitter/url/https/nextflowio.svg?colorB=26af64&&label=%40nextflow&style=popout)](https://twitter.com/nextflowio)
 [![Nextflow Publication](https://img.shields.io/badge/Published-Nature%20Biotechnology-26af64.svg?colorB=26af64&style=popout)](https://www.nature.com/articles/nbt.3820)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?colorB=26af64&style=popout)](http://bioconda.github.io/recipes/nextflow/README.html)
@@ -15,7 +16,7 @@ Quick overview
 ==============
 Nextflow is a bioinformatics workflow manager that enables the development of portable and reproducible workflows.
 It supports deploying workflows on a variety of execution platforms including local, HPC schedulers, AWS Batch,
-Google Genomics Pipelines, and Kubernetes. Additionally, it provides support for manage your workflow dependencies
+Google Cloud Life Sciences, and Kubernetes. Additionally, it provides support for manage your workflow dependencies
 through built-in support for Conda, Docker, Singularity, and Modules.
 
 ## Contents
@@ -72,7 +73,7 @@ Nextflow does not require any installation procedure, just download the distribu
 this command in your terminal:
 
 ```
-curl -fsSL get.nextflow.io | bash
+curl -fsSL https://get.nextflow.io | bash
 ```
 
 It creates the ``nextflow`` executable file in the current directory. You may want to move it to a folder accessible from your ``$PATH``.
@@ -104,7 +105,8 @@ Currently the following clusters are supported:
   + [LSF](https://www.nextflow.io/docs/latest/executor.html#lsf)
   + [SLURM](https://www.nextflow.io/docs/latest/executor.html#slurm)
   + [PBS/Torque](https://www.nextflow.io/docs/latest/executor.html#pbs-torque)
-  + [HTCondor (experimental)](https://www.nextflow.io/docs/latest/executor.html#htcondor)
+  + [HTCondor (beta)](https://www.nextflow.io/docs/latest/executor.html#htcondor)
+  + [Moab (beta)](https://www.nextflow.io/docs/latest/executor.html#moab)
 
 For example to submit the execution to a SGE cluster create a file named `nextflow.config`, in the directory
 where the pipeline is going to be launched, with the following content:
@@ -249,7 +251,7 @@ Read more at these links:
 IntelliJ IDEA
 ---------------
 
-Nextflow development with [IntelliJ IDEA](https://www.jetbrains.com/idea/) requires the latest version of the IDE (2018.3 or higher).
+Nextflow development with [IntelliJ IDEA](https://www.jetbrains.com/idea/) requires the latest version of the IDE (2019.1.2 or later).
 
 If you have it installed in your computer, follow the steps below in order to use it with Nextflow:
 
@@ -261,6 +263,7 @@ If you have it installed in your computer, follow the steps below in order to us
 6. When the import process complete, select the "Project structure" command in the "File" menu bar.
 7. In the showed dialog click on the "Project" item in the list of the left, and make sure that
    the "Project SDK" choice on the right contains Java 8.
+8. Set the code formatting options with setting provided [here](https://github.com/nextflow-io/nextflow/blob/master/CONTRIBUTING.md#ide-settings).
 
 
 
@@ -268,8 +271,6 @@ Contributing
 ============
 
 Project contribution are more than welcome. See the [CONTRIBUTING](CONTRIBUTING.md) file for details.
-
-Information on setting up your development environment to work on *Nextflow* can be found [here](BuildFromSource.md)
 
 
 Build servers

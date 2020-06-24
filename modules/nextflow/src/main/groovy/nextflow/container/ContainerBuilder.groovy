@@ -119,7 +119,7 @@ abstract class ContainerBuilder<V extends ContainerBuilder> {
         return run + ' ' + launcher
     }
 
-    String getKillCommand() { return null }
+    String getKillCommand() { return '[[ "$pid" ]] && kill $pid 2>/dev/null' }
 
     String getRemoveCommand() { return null }
 

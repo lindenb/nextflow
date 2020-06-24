@@ -16,7 +16,7 @@
 
 package nextflow.config
 
-import static nextflow.util.ConfigHelper.parseValue
+import static nextflow.util.ConfigHelper.*
 
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -30,6 +30,11 @@ import nextflow.cli.CmdNode
 import nextflow.cli.CmdRun
 import nextflow.exception.AbortOperationException
 import nextflow.exception.ConfigParseException
+import nextflow.trace.GraphObserver
+import nextflow.trace.ReportObserver
+import nextflow.trace.TimelineObserver
+import nextflow.trace.TraceFileObserver
+import nextflow.trace.WebLogObserver
 import nextflow.util.HistoryFile
 /**
  * Builds up the Nextflow configuration object
@@ -63,7 +68,15 @@ class ConfigBuilder {
 
     List<Path> parsedConfigFiles = []
 
+    List<String> parsedProfileNames
+
     boolean showClosures
+
+    boolean showMissingVariables
+
+    Map<ConfigObject, String> emptyVariables = new LinkedHashMap<>(10)
+
+    List<String> warnings = new ArrayList<>(10);
 
     {
         setHomeDir(Const.APP_HOME_DIR)
@@ -72,6 +85,11 @@ class ConfigBuilder {
 
     ConfigBuilder setShowClosures(boolean value) {
         this.showClosures = value
+        return this
+    }
+
+    ConfigBuilder showMissingVariables(boolean value) {
+        this.showMissingVariables = value
         return this
     }
 
@@ -115,6 +133,11 @@ class ConfigBuilder {
     ConfigBuilder setProfile( String value ) {
         profile = value ?: DEFAULT_PROFILE
         validateProfile = value as boolean
+        return this
+    }
+
+    ConfigBuilder setShowAllProfiles(boolean value) {
+        this.showAllProfiles = value
         return this
     }
 
@@ -306,6 +329,8 @@ class ConfigBuilder {
             final binding = new HashMap(System.getenv())
             binding.putAll(env)
             binding.put('baseDir', baseDir)
+            binding.put('projectDir', baseDir)
+            binding.put('launchDir', Paths.get('.').toRealPath())
 
             slurper.setBinding(binding)
 
@@ -324,7 +349,7 @@ class ConfigBuilder {
                 }
             }
 
-            log.trace "Resolved config object:\n${result.prettyPrint().indent('  ')}"
+            this.parsedProfileNames = new ArrayList<>(slurper.getProfileNames())
             if( validateProfile ) {
                 checkValidProfile(slurper.getConditionalBlockNames())
             }
@@ -390,16 +415,46 @@ class ConfigBuilder {
      * @param file The source config file/snippet
      * @return
      */
-    protected validate(ConfigObject config, file, String parent=null) {
-        for( String key : config.keySet() ) {
+    protected validate(ConfigObject config, file, String parent=null, List stack = new ArrayList()) {
+        for( String key : new ArrayList<>(config.keySet()) ) {
             final value = config.get(key)
             if( value instanceof ConfigObject ) {
                 final fqKey = parent ? "${parent}.${key}": key as String
                 if( value.isEmpty() ) {
-                    log.debug "In the following config object the attribute `$fqKey` is empty:\n${config.prettyPrint().indent('  ')}"
-                    throw new ConfigParseException("Unknown config attribute `$fqKey` -- check config file: $file")
+                    final msg = "Unknown config attribute `$fqKey` -- check config file: $file".toString()
+                    if( showMissingVariables ) {
+                        emptyVariables.put(value, key)
+                        warnings.add(msg)
+                    }
+                    else {
+                        log.debug("In the following config snippet the attribute `$fqKey` is empty:\n${->config.prettyPrint().indent('  ')}")
+                        throw new ConfigParseException(msg)
+                    }
                 }
-                validate(value, file, fqKey)
+                else {
+                    stack.push(config)
+                    try {
+                        if( !stack.contains(value)) {
+                            validate(value, file, fqKey, stack)
+                        }
+                        else {
+                            log.debug("Found a recursive config property: `$fqKey`")
+                        }
+                    }
+                    finally {
+                        stack.pop()
+                    }
+                }
+            }
+            else if( value instanceof GString && showMissingVariables ) {
+                final str = (GString) value
+                for( int i=0; i<str.values.length; i++ ) {
+                    // try replace empty interpolated strings with variable handle
+                    final arg = str.values[i]
+                    final name = emptyVariables.get(arg)
+                    if( name )
+                        str.values[i] = '$' + name
+                }
             }
         }
     }
@@ -445,7 +500,8 @@ class ConfigBuilder {
     void configRunOptions(ConfigObject config, Map env, CmdRun cmdRun) {
 
         // -- set config options
-        config.cacheable = cmdRun.cacheable
+        if( cmdRun.cacheable != null )
+            config.cacheable = cmdRun.cacheable
 
         // -- set the run name
         if( cmdRun.runName )
@@ -465,7 +521,7 @@ class ConfigBuilder {
         if( cmdRun.libPath )
             config.libDir = cmdRun.libPath
 
-        else if ( !config.libDir )
+        else if ( !config.isSet('libDir') && env.get('NXF_LIB') )
             config.libDir = env.get('NXF_LIB')
 
         // -- override 'process' parameters defined on the cmd line
@@ -508,9 +564,10 @@ class ConfigBuilder {
             if( !(config.trace instanceof Map) )
                 config.trace = [:]
             config.trace.enabled = true
-            if( !config.trace.file )
+            if( cmdRun.withTrace != '-' )
                 config.trace.file = cmdRun.withTrace
-
+            else if( !config.trace.file )
+                config.trace.file = TraceFileObserver.DEF_FILE_NAME
         }
 
         // -- sets report report options
@@ -518,8 +575,10 @@ class ConfigBuilder {
             if( !(config.report instanceof Map) )
                 config.report = [:]
             config.report.enabled = true
-            if( !config.report.file )
+            if( cmdRun.withReport != '-' )
                 config.report.file = cmdRun.withReport
+            else if( !config.report.file )
+                config.report.file = ReportObserver.DEF_FILE_NAME
         }
 
         // -- sets timeline report options
@@ -527,8 +586,10 @@ class ConfigBuilder {
             if( !(config.timeline instanceof Map) )
                 config.timeline = [:]
             config.timeline.enabled = true
-            if( !config.timeline.file )
+            if( cmdRun.withTimeline != '-' )
                 config.timeline.file = cmdRun.withTimeline
+            else if( !config.timeline.file )
+                config.timeline.file = TimelineObserver.DEF_FILE_NAME
         }
 
         // -- sets DAG report options
@@ -536,8 +597,10 @@ class ConfigBuilder {
             if( !(config.dag instanceof Map) )
                 config.dag = [:]
             config.dag.enabled = true
-            if( !config.dag.file )
+            if( cmdRun.withDag != '-' )
                 config.dag.file = cmdRun.withDag
+            else if( !config.dag.file )
+                config.dag.file = GraphObserver.DEF_FILE_NAME
         }
 
         if( cmdRun.withNotification ) {
@@ -557,10 +620,19 @@ class ConfigBuilder {
             if( !(config.weblog instanceof Map) )
                 config.weblog = [:]
             config.weblog.enabled = true
-            if ( !config.weblog.url )
+            if( cmdRun.withWebLog != '-' )
                 config.weblog.url = cmdRun.withWebLog
+            else if( !config.weblog.url )
+                config.weblog.url = WebLogObserver.DEF_URL
         }
 
+        // -- sets tower options
+        if( cmdRun.withTower ) {
+            if( !(config.tower instanceof Map) )
+                config.tower = [:]
+            config.tower.enabled = true
+            config.tower.endpoint = cmdRun.withTower
+        }
 
         // -- add the command line parameters to the 'taskConfig' object
         if( cmdRun.params || cmdRun.paramsFile )
@@ -574,6 +646,10 @@ class ConfigBuilder {
 
         if( cmdRun.withDocker ) {
             configContainer(config, 'docker', cmdRun.withDocker)
+        }
+
+        if( cmdRun.withPodman ) {
+            configContainer(config, 'podman', cmdRun.withPodman)
         }
 
         if( cmdRun.withSingularity ) {

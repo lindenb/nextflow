@@ -10,11 +10,12 @@ Requirements
 ============
 
 `Nextflow` can be used on any POSIX compatible system (Linux, OS X, etc).
-It requires Bash 3.2 (or later) and `Java 8 (or later) <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_ to be installed.
+It requires Bash 3.2 (or later) and `Java 8 (or later, up to 11) <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_ to be installed.
 
-Windows systems may be supported using a POSIX compatibility layer like `Cygwin <http://www.cygwin.com>`_ (unverified) or,
-alternatively, installing it into a Linux VM using virtualization software like `VirtualBox <http://www.virtualbox.org>`_
-or `VMware <http://www.vmware.com/>`_.
+For the execution in a cluster of computers the use a shared file system is required to allow
+the sharing of tasks input/output files.
+
+Windows system is supported through `WSL <https://en.wikipedia.org/wiki/Windows_Subsystem_for_Linux>`_.
 
 .. _getstart-install:
 
@@ -50,7 +51,7 @@ Copy the following example into your favourite text editor and save it to a file
     process splitLetters {
 
         output:
-        file 'chunk_*' into letters mode flatten
+        file 'chunk_*' into letters
 
         """
         printf '${params.str}' | split -b 6 - chunk_
@@ -61,7 +62,7 @@ Copy the following example into your favourite text editor and save it to a file
     process convertToUpper {
 
         input:
-        file x from letters
+        file x from letters.flatten()
 
         output:
         stdout result
@@ -71,15 +72,13 @@ Copy the following example into your favourite text editor and save it to a file
         """
     }
 
-    result.subscribe {
-        println it.trim()
-    }
+    result.view { it.trim() }
 
 
-This script defines two processes. The first splits a string in file chunks containing 6 characters,
+This script defines two processes. The first splits a string into 6-character chunks, writing each one to a file with the prefix ``chunk_``,
 and the second receives these files and transforms their contents to uppercase letters.
 The resulting strings are emitted on the ``result`` channel and the final output is printed by the
-``subscribe`` operator.
+``view`` operator.
 
 
 
@@ -89,11 +88,10 @@ Execute the script by entering the following command in your terminal::
 
 It will output something similar to the text shown below::
 
-    N E X T F L O W  ~  version 18.10.1
-    [warm up] executor > local
-    [22/7548fa] Submitted process > splitLetters (1)
-    [e2/008ee9] Submitted process > convertToUpper (1)
-    [1e/165130] Submitted process > convertToUpper (2)
+    N E X T F L O W  ~  version 19.04.0
+    executor >  local (3)
+    [69/c8ea4a] process > splitLetters   [100%] 1 of 1 ✔
+    [84/c8b7f1] process > convertToUpper [100%] 2 of 2 ✔
     HELLO
     WORLD!
 
@@ -148,11 +146,10 @@ Then save the file with the same name, and execute it by adding the ``-resume`` 
 
 It will print output similar to this::
 
-    N E X T F L O W  ~  version 18.10.1
-    [warm up] executor > local
-    [22/7548fa] Cached process > splitLetters (1)
-    [d0/7b79a3] Submitted process > convertToUpper (1)
-    [b0/c99ef9] Submitted process > convertToUpper (2)
+    N E X T F L O W  ~  version 19.04.0
+    executor >  local (2)
+    [69/c8ea4a] process > splitLetters   [100%] 1 of 1, cached: 1 ✔
+    [d0/e94f07] process > convertToUpper [100%] 2 of 2 ✔
     olleH
     !dlrow
 
@@ -162,7 +159,7 @@ its results are retrieved from the cache. The second process is executed as expe
 
 
 .. tip:: The pipeline results are cached by default in the directory ``$PWD/work``. Depending on your script, this folder
-  can take of lot of disk space. If your are sure you won't resume your pipeline execution, clean this folder periodically.
+  can take of lot of disk space. If you are sure you won't resume your pipeline execution, clean this folder periodically.
 
 .. _getstart-params:
 
@@ -175,20 +172,16 @@ Their value can be specified on the command line by prefixing the parameter name
 For the sake of this tutorial, you can try to execute the previous example specifying a different input
 string parameter, as shown below::
 
-  nextflow run tutorial.nf --str 'Hola mundo'
+  nextflow run tutorial.nf --str 'Bonjour le monde'
 
 
 The string specified on the command line will override the default value of the parameter. The output
 will look like this::
 
-    N E X T F L O W  ~  version 18.10.1
-    [warm up] executor > local
-    [6d/54ab39] Submitted process > splitLetters (1)
-    [a1/88716d] Submitted process > convertToUpper (2)
-    [7d/3561b6] Submitted process > convertToUpper (1)
-    odnu
-    m aloH
-
-
-
-
+    N E X T F L O W  ~  version 19.04.0
+    executor >  local (4)
+    [8b/16e7d7] process > splitLetters   [100%] 1 of 1 ✔
+    [eb/729772] process > convertToUpper [100%] 3 of 3 ✔
+    m el r
+    edno
+    uojnoB

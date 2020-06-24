@@ -15,24 +15,30 @@
  */
 
 package nextflow.processor
+
 import java.nio.file.Files
 import java.nio.file.Paths
 
 import ch.grengine.Grengine
 import nextflow.Session
+import nextflow.ast.TaskCmdXform
 import nextflow.container.ContainerConfig
 import nextflow.executor.Executor
 import nextflow.file.FileHolder
-import nextflow.script.EnvInParam
-import nextflow.script.FileInParam
-import nextflow.script.FileOutParam
+import nextflow.script.BodyDef
 import nextflow.script.ScriptBinding
-import nextflow.script.StdInParam
-import nextflow.script.StdOutParam
-import nextflow.script.TaskBody
 import nextflow.script.TokenVar
-import nextflow.script.ValueInParam
-import nextflow.script.ValueOutParam
+import nextflow.script.params.EnvInParam
+import nextflow.script.params.EnvOutParam
+import nextflow.script.params.FileInParam
+import nextflow.script.params.FileOutParam
+import nextflow.script.params.StdInParam
+import nextflow.script.params.StdOutParam
+import nextflow.script.params.ValueInParam
+import nextflow.script.params.ValueOutParam
+import nextflow.util.BlankSeparatedList
+import org.codehaus.groovy.control.CompilerConfiguration
+import org.codehaus.groovy.control.customizers.ASTTransformationCustomizer
 import spock.lang.Specification
 import spock.lang.Unroll
 import test.TestHelper
@@ -42,6 +48,10 @@ import test.TestHelper
  */
 
 class TaskRunTest extends Specification {
+
+    def setupSpec() {
+        new Session()
+    }
 
     def testGetInputsByType() {
 
@@ -423,7 +433,7 @@ class TaskRunTest extends Specification {
          * plain task script
          */
         when:
-        task.resolve(new TaskBody({-> 'Hello'}, 'Hello', 'script'))
+        task.resolve(new BodyDef({-> 'Hello'}, 'Hello', 'script'))
         then:
         task.script == 'Hello'
         task.source == 'Hello'
@@ -433,11 +443,42 @@ class TaskRunTest extends Specification {
          */
         when:
         task.context = new TaskContext(Mock(Script),[x: 'world'],'foo')
-        task.resolve(new TaskBody({-> "Hello ${x}"}, 'Hello ${x}', 'script'))
+        task.resolve(new BodyDef({-> "Hello ${x}"}, 'Hello ${x}', 'script'))
         then:
         task.script == 'Hello world'
         task.source == 'Hello ${x}'
 
+    }
+
+    def 'should escape file names with blanks' () {
+        given:
+        def compilerConfig = new CompilerConfiguration()
+        compilerConfig.addCompilationCustomizers(new ASTTransformationCustomizer(TaskCmdXform))
+        def shell = new GroovyShell(compilerConfig)
+        def body = (Closure)shell.evaluate('{-> "cat ${one}\\nhead ${many}"}')
+        and:
+        def task = new TaskRun()
+        task.processor = [:] as TaskProcessor
+        def VARS = [
+                one: new TaskPath(Paths.get('a b.txt')),
+                many: new BlankSeparatedList([Paths.get('a.txt'), Paths.get('b b.txt')])
+        ]
+
+        /*
+         * plain task script
+         */
+        when:
+        task.context = new TaskContext(Mock(Script),VARS,'foo')
+        task.resolve(new BodyDef(body, 'cat ${one}\nhead ${many}', 'script'))
+        then:
+        task.script == '''
+                    cat a\\ b.txt
+                    head a.txt b\\ b.txt
+                    '''.stripIndent().trim()
+        task.source == '''
+                    cat ${one}
+                    head ${many}
+                    '''.stripIndent().trim()
     }
 
     def 'should parse a `shell` script' () {
@@ -461,7 +502,7 @@ class TaskRunTest extends Specification {
         when:
         task.context = new TaskContext(script,local,'foo')
         task.config = new TaskConfig().setContext(task.context)
-        task.resolve(new TaskBody({-> '$BASH_VAR !{nxf_var} - !{params.var_no}'}, '<the source script>', 'shell'))  // <-- note: 'shell' type
+        task.resolve(new BodyDef({-> '$BASH_VAR !{nxf_var} - !{params.var_no}'}, '<the source script>', 'shell'))  // <-- note: 'shell' type
         then:
         task.script == '$BASH_VAR YES - NO'
         task.source == '<the source script>'
@@ -473,7 +514,7 @@ class TaskRunTest extends Specification {
         task.context = new TaskContext(Mock(Script),[nxf_var: '>interpolated value<'],'foo')
         task.config = new TaskConfig().setContext(task.context)
         task.config.placeholder = '#' as char
-        task.resolve(new TaskBody({-> '$BASH_VAR #{nxf_var}'}, '$BASH_VAR #{nxf_var}', 'shell'))  // <-- note: 'shell' type
+        task.resolve(new BodyDef({-> '$BASH_VAR #{nxf_var}'}, '$BASH_VAR #{nxf_var}', 'shell'))  // <-- note: 'shell' type
         then:
         task.script == '$BASH_VAR >interpolated value<'
         task.source == '$BASH_VAR #{nxf_var}'
@@ -497,7 +538,7 @@ class TaskRunTest extends Specification {
         task.config = new TaskConfig().setContext(task.context)
 
         when:
-        task.resolve( new TaskBody({-> template(my_file)}, 'template($file)', 'script'))
+        task.resolve( new BodyDef({-> template(my_file)}, 'template($file)', 'script'))
         then:
         task.script == 'echo Ciao mondo'
         task.source == 'echo ${say_hello}'
@@ -522,7 +563,7 @@ class TaskRunTest extends Specification {
         task.config = new TaskConfig().setContext(task.context)
 
         when:
-        task.resolve( new TaskBody({-> template(my_file)}, 'template($file)', 'shell'))
+        task.resolve( new BodyDef({-> template(my_file)}, 'template($file)', 'shell'))
         then:
         task.script == 'echo $HOME ~ Foo bar'
         task.source == 'echo $HOME ~ !{user_name}'
@@ -548,7 +589,7 @@ class TaskRunTest extends Specification {
         task.config.placeholder = '#' as char
 
         when:
-        task.resolve( new TaskBody({-> template(my_file)}, 'template($file)', 'shell'))
+        task.resolve( new BodyDef({-> template(my_file)}, 'template($file)', 'shell'))
         then:
         task.script == 'echo $HOME ~ Foo bar'
         task.source == 'echo $HOME ~ #{user_name}'
@@ -676,5 +717,123 @@ class TaskRunTest extends Specification {
 
     }
 
+    def 'should return output env names' () {
+        given:
+        def env1 = new EnvOutParam(new Binding(),[]).bind(new TokenVar('FOO'))
+        def env2 = new EnvOutParam(new Binding(),[]).bind(new TokenVar('BAR'))
+        def task = new TaskRun()
+        task.outputs.put(env1, null)
+        task.outputs.put(env2, null)
 
+        when:
+        def names = task.getOutputEnvNames()
+        then:
+        names == ['FOO','BAR']
+    }
+
+
+    def 'should capture variables' () {
+        given:
+        def processor = new TaskProcessor()
+        and:
+        def ctx = new TaskContext(holder:[params:[foo: 'Hello'], alpha: 1, omega: 2])
+        def task = new TaskRun(processor: processor, context: ctx, config: new TaskConfig())
+
+        when:
+        def result = task.renderScript('echo !{params.foo} !{alpha} !{omega}')
+        then:
+        result == 'echo Hello 1 2'
+
+    }
+
+
+    def 'should return tasks global variables map'() {
+        given:
+        def processor = new TaskProcessor()
+        processor.name = 'Hello'
+        and:
+        def context = Mock(TaskContext)
+        def binding = new Binding(x:1, y:2, params: [alpha: 'one'], 'workDir': Paths.get('/work/dir'), baseDir: Paths.get('/base/dir'))
+        and:
+        def task = Spy(TaskRun)
+        task.context = context
+        task.processor = processor
+        task.getVariableNames() >> ['q', 'x', 'y', 'params.alpha', 'params.beta.delta', 'workDir', 'baseDir']
+
+        when:
+        def result = task.getGlobalVars(binding)
+        then:
+        // note: since 'q' is include in the task local scope, is not returned in the var list
+        result == [x:1, y:2, 'params.alpha': 'one', 'params.beta.delta': null , baseDir: '/base/dir', workDir: '/work/dir']
+
+        when:
+        result = task.getGlobalVars(binding)
+        then:
+        1 * context.isLocalVar('x') >> true
+        1 * context.isLocalVar('y') >> true
+        and:
+        result == ['params.alpha': 'one', 'params.beta.delta': null , baseDir: '/base/dir', workDir: '/work/dir']
+    }
+
+    def 'should fetch script variable names' () {
+        given:
+        def task = new TaskRun()
+        task.processor = new TaskProcessor()
+        task.context = Mock(TaskContext)
+
+        when:
+        task.resolve(new BodyDef({-> "Hello ${x}"}, 'Hello ${x}', 'script'))
+        and:
+        def vars = task.getVariableNames()
+        then:
+        1 * task.context.getVariableNames() >> ['foo']
+        and: 
+        vars == ['foo'] as Set
+    }
+
+    def 'should fetch shell variable names' () {
+        given:
+        def task = new TaskRun()
+        task.processor = Spy(TaskProcessor) {
+            getDeclaredNames() >> ['input_x']
+        }
+        task.context = new TaskContext(holder: [foo:'alpha', bar:'beta', input_x:'delta'])
+        task.config = new TaskConfig()
+
+        when:
+        task.resolve(new BodyDef({-> 'Hello !{foo} !{bar} !{input_x}'}, 'Hello..', 'shell'))
+        and:
+        def vars = task.getVariableNames()
+        then:
+        vars == ['foo','bar'] as Set
+        and:
+        task.script == 'Hello alpha beta delta'
+    }
+
+    def 'should fetch template variable names' () {
+        given:
+        def dir = Files.createTempDirectory('test')
+        def template = dir.resolve('foo.sh')
+        template.text = 'echo ${foo} ${bar} ${input_x}'
+        and:
+
+        def task = new TaskRun()
+        task.processor = Spy(TaskProcessor) {
+            getDeclaredNames() >> ['input_x']
+        }
+        task.context = new TaskContext(holder: [foo:'foo',bar:'bar',input_x:'xxx'])
+        task.config = new TaskConfig()
+
+        when:
+        task.resolve(new BodyDef({-> template }, 'Hello..', 'script'))
+        and:
+        def vars = task.getVariableNames()
+        then:
+        vars == ['foo','bar'] as Set
+        and:
+        task.script == 'echo foo bar xxx'
+
+        cleanup:
+        dir?.deleteDir()
+    }
 }

@@ -57,6 +57,8 @@ import nextflow.util.Escape
 @CompileStatic
 class FileHelper {
 
+    static final public Pattern URL_PROTOCOL = ~/^([a-zA-Z][a-zA-Z0-9]*)\:\\/\\/.+/
+
     static final private Path localTempBasePath
 
     static private Random rndGen = new Random()
@@ -250,6 +252,10 @@ class FileHelper {
         if( !str.contains(':/') ) {
             return Paths.get(str)
         }
+
+        final result = FileSystemPathFactory.parse(str)
+        if( result )
+            return result
 
         asPath(toPathURI(str))
     }
@@ -446,7 +452,7 @@ class FileHelper {
 
     @PackageScope
     static Map envFor0(String scheme, Map env) {
-        def result = [:]
+        def result = new LinkedHashMap(10)
         if( scheme?.toLowerCase() == 's3' ) {
 
             List credentials = Global.getAwsCredentials(env)
@@ -454,6 +460,10 @@ class FileHelper {
                 // S3FS expect the access - secret keys pair in lower notation
                 result.access_key = credentials[0]
                 result.secret_key = credentials[1]
+                if (credentials.size() == 3) {
+                    result.session_token = credentials[2]
+                    log.debug "Using AWS temporary session token for S3FS."
+                }
             }
 
             // AWS region
@@ -482,6 +492,9 @@ class FileHelper {
 
         if( config.secret_key && config.secret_key.size()>6 )
             result.secret_key = "${config.secret_key.substring(0,6)}.."
+
+        if( config.session_token && config.session_token.size()>6 )
+            result.session_token = "${config.session_token.substring(0,6)}.."
 
         return result.toString()
     }
@@ -731,7 +744,7 @@ class FileHelper {
             @Override
             FileVisitResult preVisitDirectory(Path fullPath, BasicFileAttributes attrs) throws IOException {
                 final int depth = fullPath.nameCount - folder.nameCount
-                final path = folder.relativize(fullPath)
+                final path = relativize0(folder, fullPath)
                 log.trace "visitFiles > dir=$path; depth=$depth; includeDir=$includeDir; matches=${matcher.matches(path)}; isDir=${attrs.isDirectory()}"
 
                 if (depth>0 && includeDir && matcher.matches(path) && attrs.isDirectory() && (includeHidden || !isHidden(fullPath))) {
@@ -773,6 +786,16 @@ class FileHelper {
             }
       })
 
+    }
+
+    static protected Path relativize0(Path folder, Path fullPath) {
+        def result = folder.relativize(fullPath)
+        String str
+        if( folder.is(FileSystems.default) || !(str=result.toString()).endsWith('/') )
+            return result
+        // strip the ending slash
+        def len = str.length()
+        len>0 ? Paths.get(str.substring(0,str.length()-1)) : Paths.get('')
     }
 
     private static boolean isHidden(Path path) {
@@ -950,6 +973,34 @@ class FileHelper {
         }
 
         throw new NoSuchFileException(FilesEx.toUriString(result))
+    }
+
+
+    /**
+     *
+     * @param script
+     * @return
+     */
+    static String getIdentifier(Path script, String prefix=null) {
+        final char UNDERSCORE = '_'
+        def str = FilesEx.getSimpleName(script)
+        StringBuilder normalised = new StringBuilder()
+        for( int i=0; i<str.length(); i++ ) {
+            final char ch = str.charAt(i)
+            final valid = i==0 ? Character.isJavaIdentifierStart(ch) : Character.isJavaIdentifierPart(ch)
+            normalised.append( valid ? ch : UNDERSCORE )
+        }
+
+        def result = prefix ? prefix + normalised : normalised.toString()
+        while(result.contains('__')) {
+            result = result.replace(/__/,'_')
+        }
+        return result
+    }
+
+    static String getUrlProtocol(String str) {
+        final m = URL_PROTOCOL.matcher(str)
+        return m.matches() ? m.group(1) : null
     }
 
 }

@@ -20,6 +20,7 @@ import java.nio.file.Paths
 import nextflow.exception.FailedGuardException
 import nextflow.k8s.model.PodOptions
 import nextflow.script.BaseScript
+import nextflow.script.ProcessConfig
 import nextflow.script.TaskClosure
 import nextflow.util.Duration
 import nextflow.util.MemoryUnit
@@ -280,13 +281,14 @@ class TaskConfigTest extends Specification {
         then:
         config.cpus == expected
         config.getCpus() == expected
+        config.hasCpus() == defined
 
         where:
-        expected                || value
-        1                       || null
-        1                       || 1
-        8                       || 8
-        10                      || { ten ?: 0  }
+        expected     | defined  | value
+        1            | false    | null
+        1            | true     | 1
+        8            | true     | 8
+        10           | true     | { ten ?: 0  }
 
     }
 
@@ -545,6 +547,29 @@ class TaskConfigTest extends Specification {
                     [secret: 'foo', mountPath: '/this'],
                     [secret: 'bar', env: 'BAR_XXX'] ])
 
+    }
+
+    def 'should get gpu resources' () {
+
+        given:
+        def script = Mock(BaseScript)
+
+        when:
+        def process = new ProcessConfig(script)
+        process.accelerator 5
+        def res = process.createTaskConfig().getAccelerator()
+        then:
+        res.limit == 5 
+        res.request == 5
+
+        when:
+        process = new ProcessConfig(script)
+        process.accelerator 5, limit: 10, type: 'nvidia'
+        res = process.createTaskConfig().getAccelerator()
+        then:
+        res.request == 5
+        res.limit == 10
+        res.type == 'nvidia'
     }
 
 }

@@ -106,7 +106,7 @@ class K8sTaskHandler extends TaskHandler {
         }
 
         // get input files paths
-        final paths = DockerBuilder.inputFilesToPaths(builder.getResolvedInputs())
+        final paths = DockerBuilder.inputFilesToPaths(builder.getInputFiles())
         final binDir = builder.binDir
         final workDir = builder.workDir
         // add standard paths
@@ -165,6 +165,7 @@ class K8sTaskHandler extends TaskHandler {
             .withNamespace(clientConfig.namespace)
             .withServiceAccount(clientConfig.serviceAccount)
             .withLabels(getLabels(task))
+            .withAnnotations(getAnnotations())
             .withPodOptions(getPodOptions())
 
         // note: task environment is managed by the task bash wrapper
@@ -175,10 +176,13 @@ class K8sTaskHandler extends TaskHandler {
         // add computing resources
         final cpus = taskCfg.get('cpus') as Integer
         final mem = taskCfg.getMemory()
+        final acc = taskCfg.getAccelerator()
         if( cpus )
             builder.withCpus(cpus as int)
         if( mem )
             builder.withMemory(mem)
+        if( acc )
+            builder.withAccelerator(acc)
 
         final List<String> hostMounts = getContainerMounts()
         for( String mount : hostMounts ) {
@@ -197,35 +201,24 @@ class K8sTaskHandler extends TaskHandler {
     }
 
 
-    protected Map getLabels(TaskRun task) {
-        Map result = [:]
+    protected Map<String,String> getLabels(TaskRun task) {
+        def result = new LinkedHashMap<String,String>(10)
         def labels = k8sConfig.getLabels()
         if( labels ) {
-            labels.each { k,v -> result.put(k,sanitize0(v)) }
+            result.putAll(labels)
         }
         result.app = 'nextflow'
-        result.runName = sanitize0(getRunName())
-        result.taskName = sanitize0(task.getName())
-        result.processName = sanitize0(task.getProcessor().getName())
-        result.sessionId = sanitize0("uuid-${executor.getSession().uniqueId}")
+        result.runName = getRunName()
+        result.taskName = task.getName()
+        result.processName = task.getProcessor().getName()
+        result.sessionId = "uuid-${executor.getSession().uniqueId}"
         return result
     }
 
-    /**
-     * Valid label must be an empty string or consist of alphanumeric characters, '-', '_' or '.',
-     * and must start and end with an alphanumeric character.
-     *
-     * @param value
-     * @return
-     */
-
-    protected String sanitize0( value ) {
-        def str = String.valueOf(value)
-        str = str.replaceAll(/[^a-zA-Z0-9\.\_\-]+/, '_')
-        str = str.replaceAll(/^[^a-zA-Z]+/, '')
-        str = str.replaceAll(/[^a-zA-Z0-9]+$/, '')
-        return str
+    protected Map getAnnotations() {
+        k8sConfig.getAnnotations()
     }
+
 
     /**
      * Creates a new K8s pod executing the associated task
@@ -270,8 +263,14 @@ class K8sTaskHandler extends TaskHandler {
     @Override
     boolean checkIfRunning() {
         if( !podName ) throw new IllegalStateException("Missing K8s pod name -- cannot check if running")
-        def state = getState()
-        return state && state.running != null
+        if(isSubmitted()) {
+            def state = getState()
+            if (state && state.running != null) {
+                status = TaskStatus.RUNNING
+                return true
+            }
+        }
+        return false
     }
 
     @Override
@@ -317,7 +316,7 @@ class K8sTaskHandler extends TaskHandler {
             exitFile.text as Integer
         }
         catch( Exception e ) {
-            log.debug "[K8s] Cannot read exitstatus for task: `$task.name`", e
+            log.debug "[K8s] Cannot read exitstatus for task: `$task.name` | ${e.message}"
             return Integer.MAX_VALUE
         }
     }
@@ -337,7 +336,7 @@ class K8sTaskHandler extends TaskHandler {
         else {
             log.debug "[K8s] Oops.. invalid delete action"
         }
-        }
+    }
 
     protected boolean cleanupDisabled() {
         !k8sConfig.getCleanup()

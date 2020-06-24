@@ -25,7 +25,17 @@ NXF_ENTRY=${1:-nxf_main}
 {{container_env}}
 
 nxf_date() {
-    local ts=$(date +%s%3N); [[ $ts == *3N ]] && date +%s000 || echo $ts
+    ## should return the current timestamp in milliseconds
+    ## note1: some linux silently ignores the `%3N` option and returns the ts in seconds (len==10)
+    ## note2: old date tool ignores the `%3N` option and append that string to the timestamp in seconds
+    ## note3: mac date tools ignores the `%3N` option and the string `3N` is appended to the timestamp in seconds
+    local ts=$(date +%s%3N);
+    if [[ ${#ts} == 10 ]]; then echo ${ts}000
+    elif [[ $ts == *%3N ]]; then echo ${ts/\%3N/000}
+    elif [[ $ts == *3N ]]; then echo ${ts/3N/000}
+    elif [[ ${#ts} == 13 ]]; then echo $ts
+    else echo "Unexpected timestamp value: $ts"; exit 1
+    fi
 }
 
 nxf_env() {
@@ -91,6 +101,7 @@ nxf_main() {
     trap on_exit EXIT
     trap on_term TERM INT USR1 USR2
 
+    [[ "${NXF_CHDIR:-}" ]] && cd "$NXF_CHDIR"
     {{container_boxid}}
     {{scratch_cmd}}
     [[ $NXF_DEBUG > 0 ]] && nxf_env
@@ -102,7 +113,7 @@ nxf_main() {
     set -u
     {{task_env}}
     [[ $NXF_SCRATCH ]] && echo "nxf-scratch-dir $HOSTNAME:$NXF_SCRATCH" && cd $NXF_SCRATCH
-    nxf_stage
+    {{stage_cmd}}
 
     set +e
     local ctmp=$(set +u; nxf_mktemp /dev/shm 2>/dev/null || nxf_mktemp $TMPDIR)
@@ -116,7 +127,7 @@ nxf_main() {
     pid=$!
     wait $pid || nxf_main_ret=$?
     wait $tee1 $tee2
-    nxf_unstage
+    {{unstage_cmd}}
     {{after_script}}
 }
 

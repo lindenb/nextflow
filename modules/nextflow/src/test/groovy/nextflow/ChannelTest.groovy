@@ -16,10 +16,6 @@
 
 package nextflow
 
-import org.junit.Rule
-import spock.lang.Specification
-import spock.lang.Timeout
-
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
@@ -27,6 +23,10 @@ import java.nio.file.Paths
 import java.util.concurrent.TimeUnit
 
 import groovyx.gpars.dataflow.DataflowQueue
+import nextflow.file.FileHelper
+import org.junit.Rule
+import spock.lang.Specification
+import spock.lang.Timeout
 import test.TemporaryPath
 import test.TestHelper
 /**
@@ -38,6 +38,133 @@ class ChannelTest extends Specification {
 
     def setupSpec() {
         new Session()
+    }
+
+    def 'should create a channel of values' () {
+        given:
+        DataflowQueue result
+
+        when:
+        result = Channel.of('a')
+        then:
+        result.val == 'a'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of('a','b','c')
+        then:
+        result.val == 'a'
+        result.val == 'b'
+        result.val == 'c'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of([1,2,3])
+        then:
+        result.val == [1,2,3]
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of([1,2], [3,4])
+        then:
+        result.val == [1,2]
+        result.val == [3,4]
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of([])
+        then:
+        result.val == []
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of()
+        then:
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of([1,2,3].toArray())
+        then:
+        result.val == 1
+        result.val == 2
+        result.val == 3
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of([].toArray())
+        then:
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of(null)
+        then:
+        result.val == null
+        result.val == Channel.STOP
+        
+
+    }
+
+    def 'should create a channel from a range' () {
+        given:
+        DataflowQueue result
+
+        when:
+        result = Channel.of(1..3)
+        then:
+        result.val == 1
+        result.val == 2
+        result.val == 3
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of(1..3,'X','Y')
+        then:
+        result.val == 1
+        result.val == 2
+        result.val == 3
+        result.val == 'X'
+        result.val == 'Y'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.of(1..3,'X'..'Y')
+        then:
+        result.val == 1
+        result.val == 2
+        result.val == 3
+        result.val == 'X'
+        result.val == 'Y'
+        result.val == Channel.STOP
+    }
+
+    def 'should create channel from a list'() {
+        given:
+        given:
+        DataflowQueue result
+
+        when:
+        result = Channel.fromList(['alpha','delta'])
+        then:
+        result.val == 'alpha'
+        result.val == 'delta'
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.fromList([])
+        then:
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.fromList(null)
+        then:
+        result.val == Channel.STOP
+
+        when:
+        result = Channel.fromList([1..3, 'X'..'Y'])
+        then:
+        result.val == 1..3
+        result.val == 'X'..'Y'
+        result.val == Channel.STOP
     }
 
     def testFrom() {
@@ -711,6 +838,53 @@ class ChannelTest extends Specification {
         result.val == Channel.STOP
         cleanup:
         folder?.deleteDir()
+    }
+
+    def 'should return single file entries' () {
+        given:
+        def files = [
+                Paths.get('/data/SRR389222_sub1.fastq.gz'),
+                Paths.get('/data/SRR389222_sub2.fastq.gz'),
+                Paths.get('/data/SRR389222_sub3.fastq.gz')
+        ]
+        
+        when:
+        def result = Channel.fromFilePairs(files)
+        then:
+        result.val == ['SRR389222_sub1', [Paths.get('/data/SRR389222_sub1.fastq.gz')]]
+        result.val == ['SRR389222_sub2', [Paths.get('/data/SRR389222_sub2.fastq.gz')]]
+        result.val == ['SRR389222_sub3', [Paths.get('/data/SRR389222_sub3.fastq.gz')]]
+        result.val == Channel.STOP
+    }
+
+    def 'should check file pair exists' () {
+        given:
+        def session = new Session()
+        def file1 = Paths.get('/data/SRR389222_sub1.fastq.gz')
+        def file2 = Paths.get('/data/SRR389222_sub2.fastq.gz')
+
+        when:
+        Channel.fromFilePairs([file1, file2], checkIfExists: true)
+        Channel.fromPath0Future.get()
+        then:
+        session == Global.session
+        session.aborted
+        session.error instanceof NoSuchFileException
+        session.error.message == file1.toString()
+    }
+
+    def 'should return single ftp entries' () {
+        given:
+        def ftp1 = FileHelper.asPath('ftp://foo.com/data/SRR389222_sub1.fastq.gz')
+        def ftp2 = FileHelper.asPath('ftp://foo.com/data/SRR389222_sub2.fastq.gz')
+
+        when:
+        def result = Channel.fromFilePairs([ftp1, ftp2])
+        then:
+        result.val == ['SRR389222_sub1', [ftp1]]
+        result.val == ['SRR389222_sub2', [ftp2]]
+        result.val == Channel.STOP
+
     }
 
 }

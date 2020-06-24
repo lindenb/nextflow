@@ -16,7 +16,9 @@
 
 package nextflow.k8s.model
 
+import nextflow.executor.res.AcceleratorResource
 import spock.lang.Specification
+import spock.lang.Unroll
 /**
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
@@ -57,7 +59,7 @@ class PodSpecBuilderTest extends Specification {
     }
 
 
-    def 'should set namespace and labels' () {
+    def 'should set namespace, labels and annotations' () {
 
         when:
         def spec = new PodSpecBuilder()
@@ -68,12 +70,75 @@ class PodSpecBuilderTest extends Specification {
                 .withNamespace('xyz')
                 .withLabel('app','myApp')
                 .withLabel('runName','something')
+                .withAnnotation("anno1", "value1")
+                .withAnnotations([anno2: "value2", anno3: "value3"])
                 .build()
 
         then:
         spec ==  [ apiVersion: 'v1',
                    kind: 'Pod',
-                   metadata: [name:'foo', namespace:'xyz', labels:[app: 'myApp', runName: 'something']],
+                   metadata: [
+                           name:'foo',
+                           namespace:'xyz',
+                           labels: [
+                                   app: 'myApp',
+                                   runName: 'something'
+                           ],
+                           annotations: [
+                                   anno1: "value1",
+                                   anno2: "value2",
+                                   anno3: "value3"
+                           ]
+                   ],
+                   spec: [
+                           restartPolicy:'Never',
+                           containers:[
+                                   [name:'foo',
+                                    image:'busybox',
+                                    command: ['sh', '-c', 'echo hello'],
+                                    workingDir:'/some/work/dir'
+                                   ]
+                           ]
+                   ]
+        ]
+    }
+    
+    def 'should truncate labels longer than 63 chars' () {
+
+        when:
+        def spec = new PodSpecBuilder()
+                .withPodName('foo')
+                .withImageName('busybox')
+                .withWorkDir('/some/work/dir')
+                .withCommand(['sh', '-c', 'echo hello'])
+                .withNamespace('xyz')
+                .withLabel('app','myApp')
+                .withLabel('runName','something')
+                .withLabel('tag','somethingreallylonggggggggggggggggggggggggggggggggggggggggggendEXTRABIT')
+                .withLabels([tag2: 'somethingreallylonggggggggggggggggggggggggggggggggggggggggggendEXTRABIT', tag3: 'somethingreallylonggggggggggggggggggggggggggggggggggggggggggendEXTRABIT'])
+                .withAnnotation("anno1", "value1")
+                .withAnnotations([anno2: "value2", anno3: "value3"])
+                .build()
+
+        then:
+        spec ==  [ apiVersion: 'v1',
+                   kind: 'Pod',
+                   metadata: [
+                           name:'foo',
+                           namespace:'xyz',
+                           labels: [
+                                   app: 'myApp',
+                                   runName: 'something',
+                                   tag: 'somethingreallylonggggggggggggggggggggggggggggggggggggggggggend',
+                                   tag2: 'somethingreallylonggggggggggggggggggggggggggggggggggggggggggend',
+                                   tag3: 'somethingreallylonggggggggggggggggggggggggggggggggggggggggggend'
+                           ],
+                           annotations: [
+                                   anno1: "value1",
+                                   anno2: "value2",
+                                   anno3: "value3"
+                           ]
+                   ],
                    spec: [
                            restartPolicy:'Never',
                            containers:[
@@ -99,6 +164,7 @@ class PodSpecBuilderTest extends Specification {
                 .withEnv(PodEnv.value('ALPHA','hello'))
                 .withEnv(PodEnv.value('DELTA', 'world'))
                 .withCpus(8)
+                .withAccelerator( new AcceleratorResource(request: 5, limit:10, type: 'foo.org') )
                 .withMemory('100Gi')
                 .build()
 
@@ -117,7 +183,9 @@ class PodSpecBuilderTest extends Specification {
                                             [name:'ALPHA', value:'hello'],
                                             [name:'DELTA', value:'world']
                                     ],
-                                    resources:[limits:[cpu:8, memory:'100Gi'] ]
+                                    resources:[
+                                            requests: ['foo.org/gpu':5],
+                                            limits:['foo.org/gpu':10, cpu:8, memory:'100Gi'] ]
                                    ]
                            ]
                    ]
@@ -149,6 +217,45 @@ class PodSpecBuilderTest extends Specification {
                                     volumeMounts:[
                                             [name:'vol-1', mountPath:'/work'],
                                             [name:'vol-2', mountPath:'/data', subPath: '/foo']] ]
+                           ],
+                           volumes:[
+                                   [name:'vol-1', persistentVolumeClaim:[claimName:'first']],
+                                   [name:'vol-2', persistentVolumeClaim:[claimName:'second']] ]
+                   ]
+
+        ]
+
+    }
+
+    def 'should only define one volume per persistentVolumeClaim' () {
+
+        when:
+        def spec = new PodSpecBuilder()
+                .withPodName('foo')
+                .withImageName('busybox')
+                .withWorkDir('/path')
+                .withCommand(['echo'])
+                .withVolumeClaim(new PodVolumeClaim('first','/work'))
+                .withVolumeClaim(new PodVolumeClaim('first','/work2', '/bar'))
+                .withVolumeClaim(new PodVolumeClaim('second', '/data', '/foo'))
+                .withVolumeClaim(new PodVolumeClaim('second', '/data2', '/fooz'))
+                .build()
+        then:
+        spec ==  [ apiVersion: 'v1',
+                   kind: 'Pod',
+                   metadata: [name:'foo', namespace:'default'],
+                   spec: [
+                           restartPolicy:'Never',
+                           containers:[
+                                   [name:'foo',
+                                    image:'busybox',
+                                    command: ['echo'],
+                                    workingDir:'/path',
+                                    volumeMounts:[
+                                            [name:'vol-1', mountPath:'/work'],
+                                            [name:'vol-1', mountPath:'/work2', subPath: '/bar'],
+                                            [name:'vol-2', mountPath:'/data', subPath: '/foo'],
+                                            [name:'vol-2', mountPath:'/data2', subPath: '/fooz']]]
                            ],
                            volumes:[
                                    [name:'vol-1', persistentVolumeClaim:[claimName:'first']],
@@ -419,7 +526,7 @@ class PodSpecBuilderTest extends Specification {
 
         given:
         def opts = Mock(PodOptions)
-        def builder = new PodSpecBuilder(podName: 'foo', imageName: 'image', command: ['echo'], labels: [runName: 'crazy_john'])
+        def builder = new PodSpecBuilder(podName: 'foo', imageName: 'image', command: ['echo'], labels: [runName: 'crazy_john'], annotations: [evict: 'false'])
 
         when:
         def spec = builder.withPodOptions(opts).build()
@@ -431,6 +538,7 @@ class PodSpecBuilderTest extends Specification {
         2 * opts.getMountSecrets() >> [ new PodMountSecret('blah', '/etc/secret.txt') ]
         2 * opts.getEnvVars() >> [ PodEnv.value('HELLO','WORLD') ]
         _ * opts.getLabels() >> [ALPHA: 'xxx', GAMMA: 'yyy']
+        _ * opts.getAnnotations() >> [OMEGA:'zzz', SIGMA:'www']
         _ * opts.getSecurityContext() >> new PodSecurityContext(1000)
         _ * opts.getNodeSelector() >> new PodNodeSelector(gpu:true, queue: 'fast')
 
@@ -440,7 +548,9 @@ class PodSpecBuilderTest extends Specification {
                 metadata: [
                         name:'foo',
                         namespace:'default',
-                        labels:[runName:'crazy_john', ALPHA:'xxx', GAMMA:'yyy'] ],
+                        labels:[runName:'crazy_john', ALPHA:'xxx', GAMMA:'yyy'],
+                        annotations: [evict: 'false', OMEGA:'zzz', SIGMA:'www']
+                ],
                 spec: [
                         restartPolicy:'Never',
                         securityContext: [ runAsUser: 1000 ],
@@ -479,5 +589,70 @@ class PodSpecBuilderTest extends Specification {
         then:
         result.size() == 1 
         result.get(0).name == 'MySecret'
+    }
+
+
+    def 'should return the resources map' () {
+
+        given:
+        def builder = new PodSpecBuilder()
+
+        when:
+        def res = builder.addAcceleratorResources(new AcceleratorResource(request:2, limit: 5), null)
+        then:
+        res.requests == ['nvidia.com/gpu': 2]
+        res.limits == ['nvidia.com/gpu': 5]
+
+        when:
+        res = builder.addAcceleratorResources(new AcceleratorResource(limit: 5, type:'foo'), null)
+        then:
+        res.requests == ['foo.com/gpu': 5]
+        res.limits == ['foo.com/gpu': 5]
+
+        when:
+        res = builder.addAcceleratorResources(new AcceleratorResource(request: 5, type:'foo.org'), null)
+        then:
+        res.requests == ['foo.org/gpu': 5]
+        res.limits == null
+
+        when:
+        res = builder.addAcceleratorResources(new AcceleratorResource(request: 5, type:'foo.org'), [limits: [cpus: 2]])
+        then:
+        res.requests == ['foo.org/gpu': 5]
+        res.limits == [cpus:2]
+
+        when:
+        res = builder.addAcceleratorResources(new AcceleratorResource(request: 5, limit: 10, type:'foo.org'), [limits: [cpus: 2]])
+        then:
+        res.requests == ['foo.org/gpu': 5]
+        res.limits == [cpus:2, 'foo.org/gpu': 10]
+
+    }
+
+
+    @Unroll
+    def 'should sanitize k8s label: #label' () {
+        given:
+        def builder = new PodSpecBuilder()
+
+        expect:
+        builder.sanitize0('foo',label, 'label') == str
+
+        where:
+        label           | str
+        null            | 'null'
+        'hello'         | 'hello'
+        'hello world'   | 'hello_world'
+        'hello  world'  | 'hello_world'
+        'hello.world'   | 'hello.world'
+        'hello-world'   | 'hello-world'
+        'hello_world'   | 'hello_world'
+        'hello_world-'  | 'hello_world'
+        'hello_world_'  | 'hello_world'
+        'hello_world.'  | 'hello_world'
+        'hello_123'     | 'hello_123'
+        'HELLO 123'     | 'HELLO_123'
+        '123hello'      | 'hello'
+        'x2345678901234567890123456789012345678901234567890123456789012345' | 'x23456789012345678901234567890123456789012345678901234567890123'
     }
 }

@@ -22,13 +22,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
+import nextflow.executor.res.AcceleratorResource
 import nextflow.util.MemoryUnit
+import groovy.util.logging.Slf4j
+
 /**
  * Object build for a K8s pod specification
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
 @CompileStatic
+@Slf4j
 class PodSpecBuilder {
 
     static @PackageScope AtomicInteger VOLUMES = new AtomicInteger()
@@ -45,6 +49,8 @@ class PodSpecBuilder {
 
     Map<String,String> labels = [:]
 
+    Map<String,String> annotations = [:]
+
     String namespace
 
     String restart
@@ -58,6 +64,8 @@ class PodSpecBuilder {
     String memory
 
     String serviceAccount
+
+    AcceleratorResource accelerator
 
     Collection<PodMountSecret> secrets = []
 
@@ -135,6 +143,11 @@ class PodSpecBuilder {
         return this
     }
 
+    PodSpecBuilder withAccelerator(AcceleratorResource acc) {
+        this.accelerator = acc
+        return this
+    }
+
     PodSpecBuilder withLabel( String name, String value ) {
         this.labels.put(name, value)
         return this
@@ -142,6 +155,16 @@ class PodSpecBuilder {
 
     PodSpecBuilder withLabels(Map labels) {
         this.labels.putAll(labels)
+        return this
+    }
+
+    PodSpecBuilder withAnnotation( String name, String value ) {
+        this.annotations.put(name, value)
+        return this
+    }
+
+    PodSpecBuilder withAnnotations(Map annotations) {
+        this.annotations.putAll(annotations)
         return this
     }
 
@@ -221,6 +244,10 @@ class PodSpecBuilder {
             if( 'runName' in keys ) throw new IllegalArgumentException("Invalid pod label -- `runName` is a reserved label")
             labels.putAll( opts.labels )
         }
+        // - annotations
+        if( opts.annotations ) {
+            annotations.putAll( opts.annotations )
+        }
         // -- security context
         if( opts.securityContext )
             securityContext = opts.securityContext
@@ -292,7 +319,10 @@ class PodSpecBuilder {
 
         // add labels
         if( labels )
-            metadata.labels = labels
+            metadata.labels = sanitize0(labels, 'label')
+
+        if( annotations)
+            metadata.annotations = sanitize0(annotations, 'annotation')
 
         final pod = [
                 apiVersion: 'v1',
@@ -311,17 +341,31 @@ class PodSpecBuilder {
             container.resources = limits
         }
 
+        // add gpu settings
+        if( accelerator ) {
+            container.resources = addAcceleratorResources(accelerator, container.resources as Map)
+        }
+
         // add storage definitions ie. volumes and mounts
         final mounts = []
         final volumes = []
+        final namesMap = [:]
+
+        // creates a volume name for each unique claim name
+        for( String claimName : volumeClaims.collect { it.claimName }.unique() ) {
+            final volName = nextVolName()
+            namesMap[claimName] = volName
+            volumes << [name: volName, persistentVolumeClaim: [claimName: claimName]]
+        }
 
         // -- volume claims
         for( PodVolumeClaim entry : volumeClaims ) {
-            final name = nextVolName()
+            //check if we already have a volume for the pvc
+            final name = namesMap.get(entry.claimName)
             final claim = [name: name, mountPath: entry.mountPath ]
-            if( entry.subPath ) claim.subPath = entry.subPath
+            if( entry.subPath )
+                claim.subPath = entry.subPath
             mounts << claim
-            volumes << [name: name, persistentVolumeClaim: [claimName: entry.claimName]]
         }
 
         // -- configMap volumes
@@ -354,6 +398,32 @@ class PodSpecBuilder {
 
     @PackageScope
     @CompileDynamic
+    Map addAcceleratorResources(AcceleratorResource accelerator, Map res) {
+
+        if( res == null )
+            res = new LinkedHashMap(2)
+
+        // tpu gou custom resource type
+        def type = accelerator.type ?: 'nvidia.com'
+        if( !type.contains('.') ) type += '.com'
+        type += '/gpu'
+
+        if( accelerator.request ) {
+            final req = res.requests ?: new LinkedHashMap<>(2)
+            req.put(type, accelerator.request)
+            res.requests = req
+        }
+        if( accelerator.limit ) {
+            final lim = res.limits ?: new LinkedHashMap<>(2)
+            lim.put(type, accelerator.limit)
+            res.limits = lim
+        }
+
+        return res
+    }
+
+    @PackageScope
+    @CompileDynamic
     static void secretToSpec(String volName, PodMountSecret entry, List mounts, List volumes ) {
         assert entry
 
@@ -380,5 +450,30 @@ class PodSpecBuilder {
         volumes << [name: volName, configMap: config ]
     }
 
+    protected Map sanitize0(Map map, String kind) {
+        final result = new HashMap(map.size())
+        for( Map.Entry entry : map )
+            result.put(entry.key, sanitize0(entry.key, entry.value, kind))
+        return result
+    }
+
+    /**
+     * Valid label must be an empty string or consist of alphanumeric characters, '-', '_' or '.',
+     * and must start and end with an alphanumeric character.
+     *
+     * @param value
+     * @return
+     */
+    protected String sanitize0( key, value, String kind ) {
+        def str = String.valueOf(value)
+        if( str.length() > 63 ) {
+            log.debug "K8s $kind exceeds allowed size: 63 -- offending name=$key value=$str"
+            str = str.substring(0,63)
+        }
+        str = str.replaceAll(/[^a-zA-Z0-9\.\_\-]+/, '_')
+        str = str.replaceAll(/^[^a-zA-Z]+/, '')
+        str = str.replaceAll(/[^a-zA-Z0-9]+$/, '')
+        return str
+    }
 
 }

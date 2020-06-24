@@ -15,21 +15,19 @@
  */
 
 package nextflow.extension
+
 import java.util.concurrent.atomic.AtomicInteger
 
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
-import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowReadChannel
 import groovyx.gpars.dataflow.DataflowWriteChannel
 import nextflow.Channel
 import nextflow.util.CheckHelper
-
 import static nextflow.extension.DataflowHelper.addToList
-
 /**
- * Implements {@link DataflowExtensions#join} operator logic
+ * Implements {@link OperatorEx#join} operator logic
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
@@ -66,10 +64,10 @@ class JoinOp {
             return [value as int]
     }
 
-    DataflowQueue apply() {
+    DataflowWriteChannel apply() {
 
         // the resulting channel
-        final result = new DataflowQueue()
+        final result = CH.create()
         // the following buffer maintains the state of collected items as a map of maps.
         // The first map associates the joining key with the collected values
         // The inner map associates the channel index with the actual values received on that channel
@@ -144,7 +142,7 @@ class JoinOp {
         //  before a match for it is found on another channel)
 
         // get the index key for this object
-        final item0 = DataflowHelper.split(pivot, data)
+        final item0 = DataflowHelper.makeKey(pivot, data)
 
         // given a key we expect to receive on object with the same key on each channel
         def channels = buffer.get(item0.keys)

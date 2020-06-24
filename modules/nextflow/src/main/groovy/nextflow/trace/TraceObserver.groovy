@@ -31,12 +31,17 @@ trait TraceObserver {
     /**
      * The is method is invoked when the flow is going to start
      */
-    void onFlowStart(Session session){}
+    void onFlowCreate(Session session) {}
+
+    /**
+     * The is method is invoked when the flow is going to start
+     */
+    void onFlowBegin() {}
 
     /**
      * This method is invoked when the flow is going to complete
      */
-    void onFlowComplete(){}
+    void onFlowComplete() {}
 
     /*
      * Invoked when the process is created.
@@ -49,26 +54,54 @@ trait TraceObserver {
     void onProcessTerminate( TaskProcessor process ){}
 
     /**
-     * This method is invoked before a process run is going to be submitted
+     * This method when a new task is created and submitted in the nextflow
+     * internal queue of pending task to be scheduled to the underlying
+     * execution backend
+     *
      * @param handler
+     * @param trace
+     */
+    void onProcessPending(TaskHandler handler, TraceRecord trace){}
+
+    /**
+     * This method is invoked before a process run is going to be submitted
+     *
+     * @param handler
+     *      The {@link TaskHandler} instance for the current task.
+     * @param trace
+     *      The associated {@link TraceRecord} fot the current task.
      */
     void onProcessSubmit(TaskHandler handler, TraceRecord trace){}
 
     /**
      * This method is invoked when a process run is going to start
+     *
      * @param handler
+     *      The {@link TaskHandler} instance for the current task.
+     * @param trace
+     *      The associated {@link TraceRecord} fot the current task.
      */
     void onProcessStart(TaskHandler handler, TraceRecord trace){}
 
     /**
      * This method is invoked when a process run completes
+     *
      * @param handler
+     *      The {@link TaskHandler} instance for the current task.
+     * @param trace
+     *      The associated {@link TraceRecord} fot the current task.
      */
     void onProcessComplete(TaskHandler handler, TraceRecord trace){}
 
     /**
-     * method invoked when a task execution is skipped because a cached result is found
+     * method invoked when a task execution is skipped because the result is cached (already computed)
+     * or stored (due to the usage of `storeDir` directive)
+     *
      * @param handler
+     *      The {@link TaskHandler} instance for the current task
+     * @param trace
+     *      The trace record for the cached trace. When this event is invoked for a store task
+     *      the {@code trace} record is expected to be {@code null}
      */
     void onProcessCached(TaskHandler handler, TraceRecord trace){}
 
@@ -79,8 +112,11 @@ trait TraceObserver {
 
     /**
      * Method that is invoked, when a workflow fails.
+     *
      * @param handler
+     *      The {@link TaskHandler} instance for the current task.
      * @param trace
+     *      The associated {@link TraceRecord} fot the current task.
      */
     void onFlowError(TaskHandler handler, TraceRecord trace){}
 }

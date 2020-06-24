@@ -15,24 +15,20 @@
  */
 
 package nextflow.extension
+
 import java.util.concurrent.atomic.AtomicInteger
 
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
-import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowReadChannel
 import groovyx.gpars.dataflow.DataflowWriteChannel
-import groovyx.gpars.dataflow.expression.DataflowExpression
 import nextflow.Channel
-import nextflow.Nextflow
-
 import static nextflow.extension.DataflowHelper.addToList
-import static nextflow.extension.DataflowHelper.split
-
+import static nextflow.extension.DataflowHelper.makeKey
 /**
- * Implements the {@link DataflowExtensions#spread(groovyx.gpars.dataflow.DataflowReadChannel, java.lang.Object)} operator
+ * Implements the {@link OperatorEx#spread(groovyx.gpars.dataflow.DataflowReadChannel, java.lang.Object)} operator
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
@@ -46,7 +42,7 @@ class CombineOp {
 
     private DataflowReadChannel rightChannel
 
-    private DataflowQueue target
+    private DataflowWriteChannel target
 
     private Map<Object,List> leftValues = [:]
 
@@ -63,14 +59,13 @@ class CombineOp {
         leftChannel = left
 
         switch(right) {
-            case DataflowQueue:
-            case DataflowExpression:
+            case DataflowReadChannel:
                 rightChannel = (DataflowReadChannel)right;
                 break
 
             case Collection:
             case (Object[]):
-                rightChannel = Nextflow.channel(right as List)
+                rightChannel = CH.emitAndClose(CH.queue(), right as Collection)
                 break
 
             default:
@@ -94,10 +89,10 @@ class CombineOp {
 
     private Map handler(int index, DataflowWriteChannel target, AtomicInteger stopCount) {
 
-        def opts = [:]
+        def opts = new LinkedHashMap(2)
         opts.onNext = {
             if( pivot ) {
-                def pair = split(pivot, it)
+                def pair = makeKey(pivot, it)
                 emit(target, index, pair.keys, pair.values)
             }
             else {
@@ -151,9 +146,9 @@ class CombineOp {
         throw new IllegalArgumentException("Not a valid spread operator index: $index")
     }
 
-    public DataflowReadChannel apply() {
+    DataflowWriteChannel apply() {
 
-        target = new DataflowQueue()
+        target = CH.create()
 
         if( rightChannel ) {
             final stopCount = new AtomicInteger(2)

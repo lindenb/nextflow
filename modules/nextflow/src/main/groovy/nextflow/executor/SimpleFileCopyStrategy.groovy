@@ -20,14 +20,11 @@ import java.nio.file.Path
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
-import nextflow.Global
-import nextflow.Session
-import nextflow.cloud.aws.batch.AwsOptions
-import nextflow.cloud.aws.batch.S3Helper
-import nextflow.file.FilePorter
 import nextflow.processor.TaskBean
 import nextflow.processor.TaskProcessor
 import nextflow.util.Escape
+import static nextflow.util.SpuriousDeps.getS3UploaderScript
+
 /**
  * Simple file strategy that stages input files creating symlinks
  * and copies the output files using the {@code cp} command.
@@ -63,8 +60,6 @@ class SimpleFileCopyStrategy implements ScriptFileCopyStrategy {
      */
     Path workDir
 
-    private FilePorter porter
-
     SimpleFileCopyStrategy() { }
 
     SimpleFileCopyStrategy( TaskBean bean ) {
@@ -93,14 +88,14 @@ class SimpleFileCopyStrategy implements ScriptFileCopyStrategy {
      * @return
      *      A map containing remote file paths resolved as local paths 
      */
-    @Override
-    Map<String,Path> resolveForeignFiles(Map<String,Path> files) {
-        if( !files  )
-            return files
-        if( !porter )
-            porter = ((Session)Global.session).getFilePorter()
-        porter.stageForeignFiles(files, getStagingDir())
-    }
+//    @Override
+//    Map<String,Path> resolveForeignFiles(Map<String,Path> files) {
+//        if( !files  )
+//            return files
+//        if( !porter )
+//            porter = ((Session)Global.session).getFilePorter()
+//        porter.stageForeignFiles(files, getStagingDir())
+//    }
 
     protected Path getStagingDir() {
         final result = workDir.parent?.parent?.resolve('stage')
@@ -233,10 +228,6 @@ class SimpleFileCopyStrategy implements ScriptFileCopyStrategy {
         throw new IllegalArgumentException("Unknown stage-in strategy: $mode")
     }
 
-    protected AwsOptions getAwsOptions() {
-        new AwsOptions(Global.session as Session)
-    }
-
     protected String getPathScheme(Path path) {
         path?.getFileSystem()?.provider()?.getScheme()
     }
@@ -346,7 +337,9 @@ class SimpleFileCopyStrategy implements ScriptFileCopyStrategy {
     @Override
     String getBeforeStartScript() {
         if( getPathScheme(targetDir) == 's3' ) {
-            return S3Helper.getUploaderScript(getAwsOptions()).leftTrim()
+            final script = getS3UploaderScript()
+            if( !script ) throw new IllegalStateException("Missing required nf-amazon module")
+            return script.leftTrim()
         }
         return null
     }

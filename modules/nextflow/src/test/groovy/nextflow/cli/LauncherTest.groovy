@@ -187,25 +187,33 @@ class LauncherTest extends Specification {
         launcher.normalizeArgs('run', '-', '-a', '-b') == ['run','-stdin', '-a', '-b']
         launcher.normalizeArgs('run') == ['run']
 
-        launcher.normalizeArgs('run','-with-trace') == ['run', '-with-trace','trace.txt']
-        launcher.normalizeArgs('run','-with-trace', '-x') == ['run', '-with-trace','trace.txt', '-x']
+        launcher.normalizeArgs('run','-with-tower') == ['run', '-with-tower', '-']
+        launcher.normalizeArgs('run','-with-tower', '-x') == ['run', '-with-tower', '-', '-x']
+        launcher.normalizeArgs('run','-with-tower', 'foo.com') == ['run', '-with-tower','foo.com']
+
+        launcher.normalizeArgs('run','-with-trace') == ['run', '-with-trace','-']
+        launcher.normalizeArgs('run','-with-trace', '-x') == ['run', '-with-trace','-', '-x']
         launcher.normalizeArgs('run','-with-trace', 'file.x') == ['run', '-with-trace','file.x']
 
-        launcher.normalizeArgs('run','-with-report') == ['run', '-with-report','report.html']
-        launcher.normalizeArgs('run','-with-report', '-x') == ['run', '-with-report','report.html', '-x']
+        launcher.normalizeArgs('run','-with-report') == ['run', '-with-report','-']
+        launcher.normalizeArgs('run','-with-report', '-x') == ['run', '-with-report','-', '-x']
         launcher.normalizeArgs('run','-with-report', 'file.x') == ['run', '-with-report','file.x']
 
-        launcher.normalizeArgs('run','-with-timeline') == ['run', '-with-timeline','timeline.html']
-        launcher.normalizeArgs('run','-with-timeline', '-x') == ['run', '-with-timeline','timeline.html', '-x']
+        launcher.normalizeArgs('run','-with-timeline') == ['run', '-with-timeline','-']
+        launcher.normalizeArgs('run','-with-timeline', '-x') == ['run', '-with-timeline','-', '-x']
         launcher.normalizeArgs('run','-with-timeline', 'file.x') == ['run', '-with-timeline','file.x']
 
-        launcher.normalizeArgs('run','-with-dag') == ['run', '-with-dag','dag.dot']
-        launcher.normalizeArgs('run','-with-dag', '-x') == ['run', '-with-dag','dag.dot', '-x']
+        launcher.normalizeArgs('run','-with-dag') == ['run', '-with-dag','-']
+        launcher.normalizeArgs('run','-with-dag', '-x') == ['run', '-with-dag','-', '-x']
         launcher.normalizeArgs('run','-with-dag', 'file.dot') == ['run', '-with-dag','file.dot']
 
         launcher.normalizeArgs('run','-with-docker') == ['run', '-with-docker','-']
         launcher.normalizeArgs('run','-with-docker', '-x') == ['run', '-with-docker','-', '-x']
         launcher.normalizeArgs('run','-with-docker', 'busybox') == ['run', '-with-docker','busybox']
+
+        launcher.normalizeArgs('run','-with-podman') == ['run', '-with-podman','-']
+        launcher.normalizeArgs('run','-with-podman', '-x') == ['run', '-with-podman','-', '-x']
+        launcher.normalizeArgs('run','-with-podman', 'busybox') == ['run', '-with-podman','busybox']
 
         launcher.normalizeArgs('run','-with-singularity') == ['run', '-with-singularity','-']
         launcher.normalizeArgs('run','-with-singularity', '-x') == ['run', '-with-singularity','-', '-x']
@@ -238,6 +246,8 @@ class LauncherTest extends Specification {
         launcher.normalizeArgs('run','-ansi-log', '-x') == ['run', '-ansi-log','true', '-x']
         launcher.normalizeArgs('run','-ansi-log', 'true', '-x') == ['run', '-ansi-log','true', '-x']
         launcher.normalizeArgs('run','-ansi-log', 'false', '-x') == ['run', '-ansi-log','false', '-x']
+
+        launcher.normalizeArgs('run','-dsl2', '-x') == ['run', '-dsl2','true', '-x']
 
         launcher.normalizeArgs( script.toAbsolutePath().toString(), '--x=1' ) == ['run', script.toAbsolutePath().toString(), '--x=1']
 

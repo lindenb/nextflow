@@ -38,7 +38,7 @@ import nextflow.processor.TaskProcessor
 @CompileStatic
 class TraceFileObserver implements TraceObserver {
 
-    static final String DEF_FILE_NAME = 'trace.txt'
+    public static final String DEF_FILE_NAME = 'trace.txt'
 
     /**
      * The list of fields included in the trace report
@@ -189,7 +189,7 @@ class TraceFileObserver implements TraceObserver {
      * "rolled" to a new file
      */
     @Override
-    void onFlowStart(Session session) {
+    void onFlowCreate(Session session) {
         log.debug "Flow starting -- trace file: $tracePath"
 
         // make sure parent path exists
@@ -269,6 +269,11 @@ class TraceFileObserver implements TraceObserver {
 
     @Override
     void onProcessCached(TaskHandler handler, TraceRecord trace) {
+        // event was triggered by a stored task, ignore it
+        if( trace == null ) {
+            return
+        }
+
         // save to the file
         writer.send { PrintWriter it -> it.println(render( trace )); it.flush() }
     }

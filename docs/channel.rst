@@ -20,6 +20,8 @@ Channel types
 
 Nextflow distinguish two different kinds of channels: `queue channels` and `value channels`.
 
+.. _channel-type-queue:
+
 Queue channel
 -------------
 
@@ -37,6 +39,7 @@ In you need to connect a process output channel to more then one process or oper
 :ref:`operator-into` operator to create two (or more) copies of the same channel and use each
 of them to connect a separate process.
 
+.. _channel-type-value:
 
 Value channel
 -------------
@@ -98,15 +101,65 @@ The available factory methods are:
 create
 ------
 
+.. warning::
+    This method is deprecated.
+
 Creates a new `channel` by using the ``create`` method, as shown below::
 
     channelObj = Channel.create()
 
 
+.. _channel-of:
+
+of
+--
+
+The ``of`` method allows you to create a channel emitting any sequence of values that are specified as the method argument,
+for example::
+
+    ch = Channel.of( 1, 3, 5, 7 )
+    ch.view { "value: $it" }
+
+The first line in this example creates a variable ``ch`` which holds a channel object. This channel emits the values
+specified as a parameter in the ``of`` method. Thus the second line prints the following::
+
+    value: 1
+    value: 3
+    value: 5
+    value: 7
+
+
+.. tip::
+    Range of values are expanded accordingly.
+
+::
+
+    Channel
+        .of(1..23, 'X', 'Y')
+        .view()
+
+Prints::
+
+    1
+    2
+    3
+    4
+    :
+    23
+    X
+    Y
+
+.. note::
+  This feature requires Nextflow version 19.10.0 of later.
+
+See also: `fromList`_ factory method.
+
 .. _channel-from:
 
 from
 ----
+
+.. warning:: This method is deprecated. Use `of`_ or `fromList`_ instead.
 
 The ``from`` method allows you to create a channel emitting any sequence of values that are specified as the method argument,
 for example::
@@ -164,6 +217,32 @@ can be specified to bind the channel to a specific value. For example::
 
 The first line in the example creates an 'empty' variable. The second line creates a channel and binds a string to it.
 Finally the last one creates a channel and binds a list object to it that will be emitted as a sole emission.
+
+
+.. _channel-fromlist:
+
+fromList
+--------
+
+The ``fromList`` method allows you to create a channel emitting the values provided as a list of elements,
+for example::
+
+    Channel
+        .fromList( ['a', 'b', 'c', 'd'] )
+        .view { "value: $it" }
+
+Prints::
+
+    a
+    b
+    c
+    d
+
+
+See also: `of`_ factory method.
+
+.. note::
+  This feature requires Nextflow version 19.10.0 of later.
 
 .. _channel-path:
 
@@ -418,8 +497,11 @@ Binding values
 Since in `Nextflow` channels are implemented using `dataflow` variables or queues. Thus sending a message
 is equivalent to `bind` a value to object representing the communication channel.
 
-bind( )
--------
+
+.. _channel-bind1:
+
+bind
+----
 
 Channel objects provide a `bind( )` method which is the basic operation to send a message over the channel.
 For example::
@@ -428,10 +510,12 @@ For example::
     myChannel.bind( 'Hello world' )
 
 
+.. _channel-bind2:
+
 operator <<
 -----------
 
-The operator ``<<`` is just a syntax sugar for the `bind( )` method. Thus, the following example produce
+The operator ``<<`` is just a syntax sugar for the `bind` method. Thus, the following example produce
 an identical result as the previous one::
 
     myChannel = Channel.create()
@@ -445,10 +529,10 @@ Observing events
 
 .. _channel-subscribe:
 
-subscribe( )
-------------
+subscribe
+---------
 
-The ``subscribe( )`` method permits to execute a user define function each time a new value is emitted by the source channel.
+The ``subscribe`` method permits to execute a user define function each time a new value is emitted by the source channel.
 
 The emitted value is passed implicitly to the specified function. For example::
 
@@ -489,10 +573,10 @@ Read :ref:`script-closure` paragraph to learn more about `closure` feature.
 onNext, onComplete, and onError
 -------------------------------
 
-The ``subscribe()`` method may accept one or more of the following event handlers:
+The ``subscribe`` method may accept one or more of the following event handlers:
 
 * ``onNext``: registers a function that is invoked whenever the channel emits a value.
-  This is the same as using the ``subscribe( )`` with a `plain` closure as describe in the examples above.
+  This is the same as using the ``subscribe`` with a `plain` closure as describe in the examples above.
 
 * ``onComplete``: registers a function that is invoked after the `last` value is emitted by the channel.
 
@@ -505,19 +589,14 @@ For example::
 
     Channel
         .from( 1, 2, 3 )
-        .subscribe onNext: { println it }, onComplete: { println 'Done.' }
+        .subscribe onNext: { println it }, onComplete: { println 'Done' }
 
 ::
 
     1
     2
     3
-    Done.
-
-
-.. Special messages
-.. STOP
-.. VOID
+    Done
 
 
 

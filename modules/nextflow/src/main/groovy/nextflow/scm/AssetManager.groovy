@@ -29,6 +29,7 @@ import nextflow.cli.HubOptions
 import nextflow.config.ConfigParser
 import nextflow.config.Manifest
 import nextflow.exception.AbortOperationException
+import nextflow.exception.AmbiguousPipelineNameException
 import nextflow.script.ScriptFile
 import nextflow.util.IniFile
 import org.eclipse.jgit.api.CreateBranchCommand
@@ -105,6 +106,12 @@ class AssetManager {
         build(pipelineName, config, cliOpts)
     }
 
+    AssetManager( String pipelineName, Map config ) {
+        assert pipelineName
+        // build the object
+        build(pipelineName, config)
+    }
+
     /**
      * Build the asset manager internal data structure
      *
@@ -133,6 +140,10 @@ class AssetManager {
         localPath ? new File(localPath,'.git/config') : null
     }
 
+    @PackageScope AssetManager setProject(String name) {
+        this.project = name
+        return this
+    }
     /**
      * Sets the user credentials on the {@link RepositoryProvider} object
      *
@@ -267,7 +278,8 @@ class AssetManager {
         }
 
         if( qualifiedName instanceof List ) {
-            throw new AbortOperationException("Which one do you mean?\n${qualifiedName.join('\n')}")
+            final msg = "Which one do you mean?\n${qualifiedName.join('\n')}"
+            throw new AmbiguousPipelineNameException(msg, qualifiedName)
         }
 
         return qualifiedName
@@ -376,6 +388,7 @@ class AssetManager {
         result.revisionInfo = getCurrentRevisionAndName()
         result.repository = getGitConfigRemoteUrl()
         result.localPath = localPath.toPath()
+        result.projectName = project
 
         return result
     }
@@ -734,6 +747,17 @@ class AssetManager {
         return result
     }
 
+    List<RevisionInfo> getRemoteRevisions() {
+        final result = new ArrayList(50)
+        for( def branch : provider.getBranches() ) {
+            result.add(new RevisionInfo(branch.commitId, branch.name, RevisionInfo.Type.BRANCH))
+        }
+        for( def tag : provider.getTags() ) {
+            result.add(new RevisionInfo(tag.commitId, tag.name, RevisionInfo.Type.TAG))
+        }
+        return result
+    }
+
     Map getBranchesAndTags(boolean checkForUpdates) {
         final result = [:]
         final current = getCurrentRevision()
@@ -893,7 +917,11 @@ class AssetManager {
     protected Ref checkoutRemoteBranch( String revision ) {
 
         try {
-            git.fetch().call()
+            def fetch = git.fetch()
+            if(provider.hasCredentials()) {
+                fetch.setCredentialsProvider( new UsernamePasswordCredentialsProvider(provider.user, provider.password) )
+            }
+            fetch.call()
             git.checkout()
                     .setCreateBranch(true)
                     .setName(revision)
@@ -935,6 +963,8 @@ class AssetManager {
         // call submodule init
         init.call()
         // call submodule update
+        if( provider.hasCredentials() )
+            update.setCredentialsProvider( new UsernamePasswordCredentialsProvider(provider.user, provider.password) )
         def updatedList = update.call()
         log.debug "Update submodules $updatedList"
     }

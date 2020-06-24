@@ -22,6 +22,7 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import groovyx.gpars.agent.Agent
 import nextflow.Const
+import nextflow.NextflowMeta
 import nextflow.Session
 import nextflow.processor.TaskHandler
 import nextflow.script.ScriptBinding.ParamsMap
@@ -76,13 +77,15 @@ class WebLogObserver implements TraceObserver{
      */
     private JsonGenerator generator
 
+    private String endpoint
+
     /**
      * Constructor that consumes a URL and creates
      * a basic HTTP client.
      * @param url The target address for sending messages to
      */
     WebLogObserver(String url) {
-        this.httpClient.setUrl(checkUrl(url))
+        this.endpoint = checkUrl(url)
         this.webLogAgent = new Agent<>(this)
         this.generator = createJsonGeneratorForPayloads()
     }
@@ -117,7 +120,7 @@ class WebLogObserver implements TraceObserver{
      * @param session The current Nextflow session object
      */
     @Override
-    void onFlowStart(Session session) {
+    void onFlowCreate(Session session) {
         this.session = session
         runName = session.getRunName()
         runId = session.getUniqueId()
@@ -131,6 +134,7 @@ class WebLogObserver implements TraceObserver{
     @Override
     void onFlowComplete() {
         asyncHttpMessage("completed", createFlowPayloadFromSession(this.session))
+        webLogAgent.await()
     }
 
     /**
@@ -204,14 +208,13 @@ class WebLogObserver implements TraceObserver{
             throw new IllegalArgumentException("Only TraceRecord and Manifest class types are supported: [${payload.getClass().getName()}] $payload")
 
         // The actual HTTP request
-        httpClient.sendHttpMessage(generator.toJson(message))
+        httpClient.sendHttpMessage(endpoint, generator.toJson(message))
         logHttpResponse()
     }
 
     protected static FlowPayload createFlowPayloadFromSession(Session session) {
         def params = session.binding.getProperty('params') as ParamsMap
-        def workflow = (WorkflowMetadata)session.binding.getVariable('workflow')
-        workflow.nextflow.timestamp = new Date(Const.APP_TIMESTAMP)
+        def workflow = session.getWorkflowMetadata()
         new FlowPayload(params, workflow)
     }
 
@@ -230,11 +233,11 @@ class WebLogObserver implements TraceObserver{
     protected void logHttpResponse(){
         def statusCode = httpClient.getResponseCode()
         if (statusCode >= 200 && statusCode < 300) {
-            log.debug "Successfully send message to ${httpClient.getUrl()} -- received status code ${statusCode}."
+            log.debug "Successfully send message to ${endpoint} -- received status code ${statusCode}."
         } else {
             def msg = """\
                 Unexpected HTTP response.
-                Failed to send message to ${httpClient.getUrl()} -- received 
+                Failed to send message to ${endpoint} -- received 
                 - status code : $statusCode    
                 - response msg: ${httpClient.getResponse()}  
                 """.stripIndent()
@@ -246,6 +249,7 @@ class WebLogObserver implements TraceObserver{
         new JsonGenerator.Options()
                 .addConverter(Path) { Path p, String key -> p.toUriString() }
                 .addConverter(Duration) { Duration d, String key -> d.durationInMillis }
+                .addConverter(NextflowMeta) { meta, key -> meta.toJsonMap() }
                 .dateFormat(Const.ISO_8601_DATETIME_FORMAT).timezone("UTC")
                 .build()
     }
@@ -259,9 +263,6 @@ class WebLogObserver implements TraceObserver{
         FlowPayload(ParamsMap params, WorkflowMetadata workflow ) {
             this.parameters = params
             this.workflow = workflow
-            this.workflow.nextflow = ["version": Const.APP_VER,
-                                      "build": Const.APP_BUILDNUM,
-                                      "timestamp": new Date(Const.APP_TIMESTAMP)]
         }
     }
 }

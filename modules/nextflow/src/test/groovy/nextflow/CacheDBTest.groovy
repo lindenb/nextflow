@@ -19,12 +19,13 @@ import java.nio.file.Files
 
 import com.google.common.hash.HashCode
 import nextflow.executor.CachedTaskHandler
-import nextflow.processor.ProcessConfig
+import nextflow.processor.TaskId
+import nextflow.script.ProcessConfig
 import nextflow.processor.TaskContext
 import nextflow.processor.TaskEntry
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
-import nextflow.script.TaskBody
+import nextflow.script.BodyDef
 import nextflow.trace.TraceRecord
 import nextflow.util.CacheHelper
 import spock.lang.Specification
@@ -48,7 +49,7 @@ class CacheDBTest extends Specification {
 
         // -- the processor mock
         def proc = Mock(TaskProcessor)
-        proc.getTaskBody() >> new TaskBody(null,'source')
+        proc.getTaskBody() >> new BodyDef(null,'source')
         proc.getConfig() >> new ProcessConfig([:])
 
         // -- the task context
@@ -59,6 +60,7 @@ class CacheDBTest extends Specification {
         def task = Mock(TaskRun)
         task.getProcessor() >> proc
         task.getHash() >> hash
+        task.getId() >> TaskId.of(2)
 
         when:
         cache.open()
@@ -80,7 +82,7 @@ class CacheDBTest extends Specification {
         then:
         entry instanceof TaskEntry
         entry.trace instanceof TraceRecord
-        entry.trace.get('task_id') == 1
+        entry.trace.get('task_id') == 2   // task_id is taken from the current TaskRun
         entry.trace.get('process') == 'foo'
         entry.trace.get('exit') == 0
         entry.context instanceof TaskContext
@@ -97,7 +99,7 @@ class CacheDBTest extends Specification {
 
         // -- the processor mock
         def proc = Mock(TaskProcessor)
-        proc.getTaskBody() >> new TaskBody(null,'source')
+        proc.getTaskBody() >> new BodyDef(null,'source')
         proc.getConfig() >> new ProcessConfig([:])
 
         // -- the task context

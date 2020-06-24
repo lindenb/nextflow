@@ -20,11 +20,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 import groovy.transform.CompileStatic
-import groovy.transform.Memoized
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import nextflow.container.ContainerBuilder
 import nextflow.container.DockerBuilder
+import nextflow.container.PodmanBuilder
 import nextflow.container.ShifterBuilder
 import nextflow.container.SingularityBuilder
 import nextflow.container.UdockerBuilder
@@ -32,6 +32,7 @@ import nextflow.processor.TaskBean
 import nextflow.processor.TaskProcessor
 import nextflow.processor.TaskRun
 import nextflow.util.Escape
+
 /**
  * Builder to create the BASH script which is used to
  * wrap and launch the user task
@@ -41,6 +42,8 @@ import nextflow.util.Escape
 @Slf4j
 @CompileStatic
 class BashWrapperBuilder {
+
+    static final public KILL_CMD = '[[ "$pid" ]] && nxf_kill $pid'
 
     static final private ENDL = '\n'
 
@@ -132,18 +135,16 @@ class BashWrapperBuilder {
         return "NXF_SCRATCH=\"\$(set +u; nxf_mktemp $scratchStr)\""
     }
 
+    protected boolean shouldUnstageOutputs() {
+        return workDir != targetDir
+    }
+
     protected boolean fixOwnership() {
         systemOsName == 'Linux' && containerConfig?.fixOwnership && runWithContainer && containerConfig.engine == 'docker' // <-- note: only for docker (shifter is not affected)
     }
 
     protected isMacOS() {
         systemOsName.startsWith('Mac')
-    }
-
-    // memoize the result to avoid to multiple time the same input files
-    @Memoized
-    protected Map<String,Path> getResolvedInputs() {
-        copyStrategy.resolveForeignFiles(inputFiles)
     }
 
     @PackageScope String buildNew0() {
@@ -154,6 +155,21 @@ class BashWrapperBuilder {
         finally {
             template.close()
         }
+    }
+
+    protected String getOutputEnvCaptureSnippet(List<String> names) {
+        def result = new StringBuilder()
+        result.append('\n')
+        result.append('# capture process environment\n')
+        result.append('set +u\n')
+        for( int i=0; i<names.size(); i++) {
+            final key = names[i]
+            result.append "echo $key=\$$key "
+            result.append( i==0 ? '> ' : '>> ' )
+            result.append(TaskRun.CMD_ENV)
+            result.append('\n')
+        }
+        result.toString()
     }
     
     protected Map<String,String> makeBinding() {
@@ -186,6 +202,11 @@ class BashWrapperBuilder {
          */
         final interpreter = TaskProcessor.fetchInterpreter(script)
 
+        if( outputEnvNames ) {
+            if( !isBash(interpreter) ) throw new IllegalArgumentException("Process output of type env is only allowed with Bash process command -- Current interpreter: $interpreter")
+            script += getOutputEnvCaptureSnippet(outputEnvNames)
+        }
+
         final binding = new HashMap<String,String>(20)
         binding.header_script = headerScript
         binding.task_name = name
@@ -199,7 +220,7 @@ class BashWrapperBuilder {
         else {
             binding.container_boxid = null
             binding.container_helpers = null
-            binding.kill_cmd = '[[ "$pid" ]] && nxf_kill $pid'
+            binding.kill_cmd = KILL_CMD
         }
 
         binding.cleanup_cmd = getCleanupCmd(changeDir)
@@ -228,7 +249,7 @@ class BashWrapperBuilder {
         /*
          * staging input files when required
          */
-        final stagingScript = copyStrategy.getStageInputFilesScript(resolvedInputs)
+        final stagingScript = copyStrategy.getStageInputFilesScript(inputFiles)
         binding.stage_inputs = stagingScript ? "# stage input files\n${stagingScript}" : null
 
         binding.stdout_file = TaskRun.CMD_OUTFILE
@@ -237,17 +258,11 @@ class BashWrapperBuilder {
 
         binding.trace_cmd = getTraceCommand(interpreter)
         binding.launch_cmd = getLaunchCommand(interpreter,env)
+        binding.stage_cmd = getStageCommand()
+        binding.unstage_cmd = getUnstageCommand()
+        binding.unstage_controls = changeDir ? getUnstageControls() : null
 
-        String copyScript = null
-        if( changeDir ) {
-            copyScript = copyFileToWorkDir(TaskRun.CMD_OUTFILE) + ' || true' + ENDL
-            copyScript += copyFileToWorkDir(TaskRun.CMD_ERRFILE) + ' || true' + ENDL
-            if( statsEnabled )
-                copyScript += copyFileToWorkDir(TaskRun.CMD_TRACE) + ' || true' + ENDL
-        }
-        binding.unstage_controls = copyScript
-
-        if( changeDir || workDir != targetDir ) {
+        if( changeDir || shouldUnstageOutputs() ) {
             binding.unstage_outputs = copyStrategy.getUnstageOutputFilesScript(outputFiles,targetDir)
         }
         else {
@@ -262,6 +277,10 @@ class BashWrapperBuilder {
         binding.trace_script = isTraceRequired() ? getTraceScript(binding) : null
         
         return binding
+    }
+
+    protected boolean isBash(String interpreter) {
+        interpreter.tokenize(' /').contains('bash')
     }
 
     protected String getTraceScript(Map binding) {
@@ -322,7 +341,12 @@ class BashWrapperBuilder {
     }
 
     private String getCondaActivateSnippet() {
-        condaEnv ? "# conda environment\nsource activate ${Escape.path(condaEnv)}\n" : null
+        if( !condaEnv )
+            return null
+        def result = "# conda environment\n"
+        result += 'source $(conda info --json | awk \'/conda_prefix/ { gsub(/"|,/, "", $2); print $2 }\')'
+        result += "/bin/activate ${Escape.path(condaEnv)}\n"
+        return result
     }
 
     protected String getTraceCommand(String interpreter) {
@@ -404,6 +428,8 @@ class BashWrapperBuilder {
          */
         if( engine == 'docker' )
             return new DockerBuilder(containerImage)
+        if( engine == 'podman' )
+            return new PodmanBuilder(containerImage)
         if( engine == 'singularity' )
             return new SingularityBuilder(containerImage)
         if( engine == 'udocker' )
@@ -432,7 +458,7 @@ class BashWrapperBuilder {
          */
         // do not mount inputs when they are copied in the task work dir -- see #1105
         if( stageInMode != 'copy' )
-            builder.addMountForInputs(resolvedInputs)
+            builder.addMountForInputs(inputFiles)
 
         builder.addMount(binDir)
 
@@ -496,6 +522,20 @@ class BashWrapperBuilder {
     String moduleLoad(String name) {
         int p = name.lastIndexOf('/')
         p != -1 ? "nxf_module_load ${name.substring(0,p)} ${name.substring(p+1)}" : "nxf_module_load ${name}"
+    }
+
+    protected String getStageCommand() { 'nxf_stage' }
+
+    protected String getUnstageCommand() { 'nxf_unstage' }
+
+    protected String getUnstageControls() {
+        def result = copyFileToWorkDir(TaskRun.CMD_OUTFILE) + ' || true' + ENDL
+        result += copyFileToWorkDir(TaskRun.CMD_ERRFILE) + ' || true' + ENDL
+        if( statsEnabled )
+            result += copyFileToWorkDir(TaskRun.CMD_TRACE) + ' || true' + ENDL
+        if(  outputEnvNames )
+            result += copyFileToWorkDir(TaskRun.CMD_ENV) + ' || true' + ENDL
+        return result
     }
 
 }

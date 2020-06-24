@@ -4,31 +4,6 @@
 Amazon Cloud
 ************
 
-Nextflow provides out of the box support for the Amazon AWS cloud allowing you to setup a computing cluster,
-deploy it and run your pipeline in the AWS infrastructure in a few commands.
-
-
-Configuration
-=============
-
-Cloud configuration attributes are provided in the ``nextflow.config`` file as shown in the example below::
-
-    cloud {
-        imageId = 'ami-4b7daa32'
-        instanceType = 'm4.xlarge'
-        subnetId = 'subnet-05222a43'
-    }
-
-The above attributes define the virtual machine ID and type to be used and the VPC subnet ID to be applied
-in you cluster. Replace these values with the ones of your choice.
-
-Nextflow only requires a Linux image that provides support for `Cloud-init <http://cloudinit.readthedocs.io/>`_
-bootstrapping mechanism and includes a Java runtime (version 8) and a Docker engine (version 1.11 or later).
-
-For your convenience the following pre-configured Amazon Linux AMI is available in the *EU Ireland* region:
-``ami-4b7daa32``.
-
-
 AWS credentials
 ---------------
 
@@ -38,6 +13,9 @@ Nextflow will use the AWS credentials defined in your environment, using the sta
     * ``AWS_SECRET_ACCESS_KEY``
     * ``AWS_DEFAULT_REGION``
 
+If ``AWS_ACCESS_KEY_ID`` and ``AWS_SECRET_ACCESS_KEY`` are not defined in the environment, Nextflow will attempt to
+retrieve credentials from your ``~/.aws/credentials`` or ``~/.aws/config`` files. The ``default`` profile can be
+overridden via the environmental variable ``AWS_PROFILE`` (or ``AWS_DEFAULT_PROFILE``).
 
 Alternatively AWS credentials can be specified in the Nextflow configuration file.
 See :ref:`AWS configuration<config-aws>` for more details.
@@ -47,225 +25,14 @@ See :ref:`AWS configuration<config-aws>` for more details.
   Read the `IAM Roles <http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html>`_ documentation
   and `this blog post <https://aws.amazon.com/blogs/security/granting-permission-to-launch-ec2-instances-with-iam-roles-passrole-permission/>`_ for more details.
 
-User & SSH key
---------------
-
-By default Nextflow creates in each EC2 instance a user with the same name as the one in your local computer and install
-the SSH public key available at the path ``$HOME/.ssh/id_rsa.pub``. A different user/key can be specified as shown below::
-
-    cloud {
-        userName = 'the-user-name'
-        keyFile = '/path/to/ssh/key.pub'
-    }
-
-If you want to use a *key-pair* defined in your AWS account and the default user configured in the AMI, specify the
-attribute ``keyName`` in place of ``keyFile`` and the name of the existing user specifying the ``userName`` attribute.
-
-
-Storage
--------
-
-The following storage types can be defined in the cloud instances: *boot*, *instance* and *shared*.
-
-Boot storage
-------------
-
-You can set the size of the `root device volume <http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/RootDeviceStorage.html>`_
-by specifying the attribute ``bootStorageSize``. For example::
-
-    cloud {
-        imageId = 'ami-xxx'
-        bootStorageSize = '10 GB'
-    }
-
-
-Instance storage
-----------------
-
-Amazon instances can provide one or more `ephemeral storage volumes <http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html>`_,
-depending the instance type chosen. This storage can be made available by using the ``instanceStorageMount``
-configuration attributes, as shown below::
-
-    cloud {
-        imageId = 'ami-xxx'
-        instanceStorageMount = '/mnt/scratch'
-    }
-
-
-The mount path can be any of your choice.
-
-.. note:: When the selected instance provides more than one ephemeral storage volume, Nextflow automatically groups all
-  of them together in a single logical volume and mounts it to the specified path. Therefore the resulting instance
-  storage size is equals to the sum of the sizes of all ephemeral volumes provided by the actual instance
-  (this feature requires Nextflow version 0.27.0 or later).
-
-If you want to mount a specific instance storage volume, specify the corresponding device name by using
-the ``instanceStorageDevice`` setting in the above configuration. See the Amazon documentation for details on
-`EC2 Instance storage <http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html>`_ and
-`devices naming <http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/device_naming.html>`_.
-
-
-Shared file system
-------------------
-
-A shared file system can easily be made available in your cloud cluster by using the `Amazon EFS <https://aws.amazon.com/efs/>`_
-storage. You will only need to specify in the cloud configuration the EFS file system ID and optionally the
-mount path. For example::
-
-    cloud {
-        imageId = 'ami-xxx'
-        sharedStorageId = 'fs-1803efd1'
-        sharedStorageMount = '/mnt/shared'
-    }
-
-.. note:: When the attribute ``sharedStorageMount`` is omitted the path ``/mnf/efs`` is used by default.
-
-
-Cluster deployment
-==================
-
-Once defined the configuration settings in the ``nextflow.config`` file you can create the cloud cluster
-by using the following command::
-
-    nextflow cloud create my-cluster -c <num-of-nodes>
-
-The string ``my-cluster`` identifies the cluster instance. Replace it with a name of your choice.
-
-Finally replace ``num-of-nodes`` with the actual number of instances that will made-up the cluster.
-One node is created as *master*, the remaining as *workers*. If the option ``-c`` is omitted only the *master* node
-is created.
-
-.. warning:: You will be charged accordingly the type and the number of instances chosen.
-
-
-Pipeline execution
-==================
-
-Once the cluster initialization is complete, connect to the *master* node using the SSH command which will be displayed by
-Nextflow.
-
-.. note:: On MacOS, use the following command to avoid being asked for a pass-phrase even
-  you haven't defined one::
-
-    ssh-add -K [private key file]
-
-You can run your Nextflow pipeline as usual, the environment is automatically configured to use the :ref:`Ignite<ignite-page>`
-executor. If the Amazon EFS storage is specified in the cloud configuration the Nextflow work directory will
-automatically be set in a shared folder in that file system.
-
-The suggested approach is to run your pipeline downloading it from a public repository such
-GitHub and to pack the binaries dependencies in a Docker container as described in the
-:ref:`Pipeline sharing <sharing-page>` section.
-
-Cluster shutdown
-================
-
-When completed shutdown the cluster instances by using the following command::
-
-    nextflow cloud shutdown my-cluster
-
-
-Cluster auto-scaling
-====================
-
-Nextflow integration for AWS cloud provides a native support auto-scaling that allows the computing cluster
-to scale-out or scale-down i.e. add or remove computing nodes dynamically at runtime.
-
-This is a critical feature, especially for pipelines crunching not homogeneous dataset, because it allows the
-cluster to adapt dynamically to the actual workload computing resources need as they change over the time.
-
-Cluster auto-scaling is enabled by adding the ``autoscale`` option group in the configuration file as shown below::
-
-    cloud {
-        imageId = 'ami-xxx'
-        autoscale {
-            enabled = true
-            maxInstances = 10
-        }
-    }
-
-
-The above example enables automatic cluster scale-out i.e. new instances are automatically launched and added to the
-cluster when tasks remain too long in wait status because there aren't enough computing resources available. The
-``maxInstances`` attribute defines the upper limit to which the cluster can grow.
-
-By default unused instances are not removed when are not utilised. If you want to enable automatic cluster scale-down
-specify the ``terminateWhenIdle`` attribute in the ``autoscale`` configuration group.
-
-It is also possible to define a different AMI image ID, type and spot price for instances launched by the Nextflow autoscaler.
-For example::
-
-    cloud {
-        imageId = 'ami-xxx'
-        instanceType = 'm4.large'
-
-        autoscale {
-            enabled = true
-            spotPrice = 0.15
-            minInstances = 5
-            maxInstances = 10
-            imageId = 'ami-yyy'
-            instanceType = 'm4.4xlarge'
-            terminateWhenIdle = true
-        }
-    }
-
-By doing that it's is possible to create a cluster with a single node i.e. the master node. Then the autoscaler will
-automatically add the missing instances, up to the number defined by the ``minInstances`` attributes. These will have a
-different image and type from the master node and will be launched a *spot instances* because the ``spotPrice``
-attribute has been specified.
-
-
-Spot prices
-===========
-
-Nextflow includes an handy command to list the current price of EC2 spot instances. Simply type the following
-command in your shell terminal::
-
-    nextflow cloud spot-prices
-
-It will print the current spot price for all available instances type, similar to the example below::
-
-    TYPE        PRICE  PRICE/CPU ZONE       DESCRIPTION             CPUS   MEMORY DISK
-    t1.micro    0.0044    0.0044 eu-west-1c Linux/UNIX                 1 627.7 MB -
-    m4.4xlarge  0.1153    0.0072 eu-west-1a Linux/UNIX (Amazon VPC)   16    64 GB -
-    m4.10xlarge 0.2952    0.0074 eu-west-1b Linux/UNIX (Amazon VPC)   40   160 GB -
-    m4.large    0.0155    0.0077 eu-west-1b Linux/UNIX (Amazon VPC)    2     8 GB -
-    m4.2xlarge  0.0612    0.0077 eu-west-1a Linux/UNIX (Amazon VPC)    8    32 GB -
-    m4.xlarge   0.0312    0.0078 eu-west-1a Linux/UNIX (Amazon VPC)    4    16 GB -
-    c4.8xlarge  0.3406    0.0095 eu-west-1c Linux/UNIX (Amazon VPC)   36    60 GB -
-    m1.xlarge   0.0402    0.0100 eu-west-1b Linux/UNIX                 4    15 GB 4 x 420 GB
-    c4.4xlarge  0.1652    0.0103 eu-west-1b Linux/UNIX (Amazon VPC)   16    30 GB -
-    c1.xlarge   0.0825    0.0103 eu-west-1a Linux/UNIX                 8     7 GB 4 x 420 GB
-    m1.medium   0.0104    0.0104 eu-west-1b Linux/UNIX (Amazon VPC)    1   3.8 GB 1 x 410 GB
-    c3.8xlarge  0.3370    0.0105 eu-west-1a Linux/UNIX                32    60 GB 2 x 320 GB
-    c3.2xlarge  0.0860    0.0108 eu-west-1c Linux/UNIX                 8    15 GB 2 x 80 GB
-    c3.4xlarge  0.1751    0.0109 eu-west-1c Linux/UNIX (Amazon VPC)   16    30 GB 2 x 160 GB
-    m3.2xlarge  0.0869    0.0109 eu-west-1c Linux/UNIX (Amazon VPC)    8    30 GB 2 x 80 GB
-    r3.large    0.0218    0.0109 eu-west-1c Linux/UNIX                 2  15.2 GB 1 x 32 GB
-    :
-
-
-It's even possible to refine the showed data by specifying a filtering and ordering criteria. For example::
-
-    nextflow cloud spot-prices -sort pricecpu -filter "cpus==4"
-
-
-It will only print instance types having 4 cpus and sorting them by the best price per cpu.
-
-
-Advanced configuration
-======================
-
-Read :ref:`Cloud configuration<config-cloud>` section to learn more about advanced cloud configuration options.
-
 
 .. _awscloud-batch:
 
 AWS Batch
 =========
 
-.. warning:: Requires Nextflow version `0.26.0` or later.
+.. note::
+    Requires Nextflow version `0.26.0` or later.
 
 `AWS Batch <https://aws.amazon.com/batch/>`_ is a managed computing service that allows the execution of containerised
 workloads in the Amazon cloud infrastructure.
@@ -302,7 +69,7 @@ An example ``nextflow.config`` file is shown below::
     aws.region = 'eu-west-1'
     
     // NOTE: this setting is only required if the AWS CLI tool is installed in a custom AMI
-    executor.awscli = '/home/ec2-user/miniconda/bin/aws'
+    aws.batch.cliPath = '/home/ec2-user/miniconda/bin/aws'
 
 .. note:: Nextflow requires to access the AWS command line tool (``aws``) from the container in which the job runs
   in order to stage the required input files and to copy back the resulting output files in the
@@ -402,12 +169,15 @@ When complete verifies that the AWS CLI package works correctly::
 
 
 By default Nextflow will assume the AWS CLI tool is directly available in the container. To use an installation
-from the host image specify the ``awscli`` parameter in the Nextflow :ref:`executor <awsbatch-executor>`
+from the host image specify the ``cliPath`` parameter in the :ref:`AWS Batch<config-aws-batch>`
 configuration as shown below::
 
-    executor.awscli = '/home/ec2-user/miniconda/bin/aws'
+    aws.batch.cliPath = '/home/ec2-user/miniconda/bin/aws'
 
 Replace the path above with the one matching the location where ``aws`` tool is installed in your AMI.
+
+.. note:: Using a version of Nextflow prior 19.07.x the config setting `executor.awscli` should be used
+  instead of `aws.batch.cliPath`.
 
 Custom job definition
 ---------------------
@@ -432,8 +202,8 @@ Pipeline execution
 The pipeline can be launched either in a local computer or a EC2 instance. The latter is suggested for heavy or long
 running workloads.
 
-Pipeline input data can be stored to be stored either locally or in a `S3 <https://aws.amazon.com/s3/>`_ bucket.
-The pipeline execution must specifies a Google Storage bucket where jobs intermediate results are stored with the
+Pipeline input data can be stored either locally or in a `S3 <https://aws.amazon.com/s3/>`_ bucket.
+The pipeline execution must specifies a AWS Storage bucket where jobs intermediate results are stored with the
 ``-bucket-dir`` command line options. For example::
 
   nextflow run my-pipeline -bucket-dir s3://my-bucket/some/path
@@ -457,9 +227,9 @@ For example::
 
   aws {
       region = 'eu-west-1'
-  }
-  executor {
-    awscli = '/home/ec2-user/miniconda/bin/aws'
+      batch {
+        cliPath = '/home/ec2-user/miniconda/bin/aws'
+      }
   }
 
   process {
@@ -473,6 +243,37 @@ For example::
 
 The above configuration snippet will deploy the execution with AWS Batch only for processes annotated
 with the :ref:`process-label` ``bigTask``, the remaining process with run in the local computer.
+
+Volume mounts
+-------------
+
+User provided container volume mounts can be provided as shown below::
+
+  aws {
+    region = 'eu-west-1'
+    batch {
+        volumes = '/tmp'
+    }
+  }
+
+Multiple volumes can be specified using a comma separated paths. The usual Docker volume mount syntax
+can be used to specify complex volumes for which the container paths is different from the host paths
+or to specify *read-only* option. For example::
+
+  aws {
+    region = 'eu-west-1'
+    batch {
+        volumes = ['/tmp', '/host/path:/mnt/path:ro']
+    }
+  }
+
+
+The above snippet defines two volume mounts the jobs executed in your pipeline. The first mounting the
+host path ``/tmp`` in the same path in the container and using *read-write* access mode. The second
+mounts the path ``/host/path`` in the host environment to the ``/mnt/path`` in the container using the
+*read-only* access mode.
+
+.. note:: This feature requires Nextflow version 19.07.x or later.
 
 Troubleshooting
 ---------------
@@ -501,6 +302,7 @@ Other places to check for error information:
 - The Job execution log in the AWS Batch dashboard.
 - The `CloudWatch <https://aws.amazon.com/cloudwatch/>`_ logs found in the ``/aws/batch/job`` log group.
 
+Advanced configuration
+----------------------
 
-
-
+Read :ref:`AWS Batch configuration<config-aws-batch>` section to learn more about advanced Batch configuration options.

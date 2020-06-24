@@ -19,12 +19,15 @@ Contents:
    operator
    executor
    config
+   dsl2
    awscloud
    amazons3
    google
    conda
    docker
+   shifter
    singularity
+   podman
    ignite
    kubernetes
    tracing

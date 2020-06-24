@@ -18,32 +18,17 @@ package nextflow.script
 
 import java.nio.file.Path
 
-import com.google.common.hash.Hashing
-import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
-import nextflow.Channel
-import nextflow.Const
-import nextflow.Nextflow
 import nextflow.Session
-import nextflow.ast.NextflowDSL
-import nextflow.ast.NextflowXform
 import nextflow.config.ConfigBuilder
 import nextflow.exception.AbortOperationException
 import nextflow.exception.AbortRunException
-import nextflow.util.ConfigHelper
-import nextflow.util.Duration
 import nextflow.util.HistoryFile
-import nextflow.util.MemoryUnit
-import nextflow.util.VersionNumber
-import org.apache.commons.lang.StringUtils
-import org.codehaus.groovy.control.CompilerConfiguration
-import org.codehaus.groovy.control.customizers.ASTTransformationCustomizer
-import org.codehaus.groovy.control.customizers.ImportCustomizer
 import static nextflow.util.ConfigHelper.parseValue
 /**
- * Application main class
+ * Run a nextflow script file
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
@@ -57,9 +42,9 @@ class ScriptRunner {
     private Session session
 
     /**
-     * The interpreted script object
+     * The script interpreter
      */
-    private BaseScript scriptObj
+    private ScriptParser scriptParser
 
     /**
      * The pipeline file (it may be null when it's provided as string)
@@ -67,34 +52,9 @@ class ScriptRunner {
     private ScriptFile scriptFile
 
     /**
-     * The pipeline as a text content
-     */
-    private String scriptText
-
-    /*
-     * the script raw output
-     */
-    private def output
-
-    /**
      * The script result
      */
     private def result
-
-    /**
-     * The launcher command line
-     */
-    private String commandLine
-
-    /**
-     * Groovy compiler config object used to parse the nextflow script
-     */
-    private CompilerConfiguration compilerConfig
-
-    /**
-     * The used configuration profile
-     */
-    String profile
 
     /**
      * Instantiate the runner object creating a new session
@@ -111,9 +71,12 @@ class ScriptRunner {
         this.session = session
     }
 
+    ScriptRunner setScript( Path script ) {
+        setScript(new ScriptFile(script))
+    }
+
     ScriptRunner setScript( ScriptFile script ) {
         this.scriptFile = script
-        this.scriptText = script.text
         return this
     }
 
@@ -124,17 +87,12 @@ class ScriptRunner {
         this.session.configFiles = builder.parsedConfigFiles
     }
 
-    ScriptRunner setScript( String text ) {
-        this.scriptText = text
-        return this
-    }
-
     Session getSession() { session }
 
     /**
      * @return The interpreted script object
      */
-    BaseScript getScriptObj() { scriptObj }
+    @Deprecated BaseScript getScriptObj() { scriptParser.script }
 
     /**
      * @return The result produced by the script execution
@@ -153,19 +111,17 @@ class ScriptRunner {
      * @return The result as returned by the {@code #run} method
      */
 
-    def execute( List<String> args = null ) {
-        assert scriptText
+    def execute( List<String> args = null, String entryName=null ) {
+        assert scriptFile
 
         // init session
-        init(scriptFile?.main, args)
+        session.init(scriptFile, args)
 
         // start session
         session.start()
         try {
             // parse the script
-            parseScript(scriptText)
-            // validate the config
-            validate()
+            parseScript(scriptFile, entryName)
             // run the code
             run()
             // await termination
@@ -191,13 +147,10 @@ class ScriptRunner {
      * @param args
      */
     def test ( String methodName, List<String> args = null ) {
-        assert scriptText
         assert methodName
-
         // init session
-        init(scriptFile.main, args)
-
-        parseScript(scriptText)
+        session.init(scriptFile, args)
+        parseScript(scriptFile, null)
         def values = args ? args.collect { parseValue(it) } : null
 
         def methodsToTest
@@ -241,134 +194,17 @@ class ScriptRunner {
         }
     }
 
-
-    def normalizeOutput() {
-        if( output instanceof Object[] ) {
-            result = output as Collection
-        }
-        else {
-            result = output
-        }
+    def normalizeOutput(output) {
+        return output
     }
 
-    protected ScriptRunner init(Path scriptPath, List<String> args = null) {
-
-        session.init(scriptPath)
-
-        session.binding.setArgs( new ArgsList(args) )
-        session.binding.setParams( (Map)session.config.params )
-        // TODO add test for this property
-        session.binding.setVariable( 'baseDir', session.baseDir )
-        session.binding.setVariable( 'workDir', session.workDir )
-        if( scriptFile ) {
-            def meta = new WorkflowMetadata(this)
-            session.binding.setVariable( 'workflow', meta )
-            session.binding.setVariable( 'nextflow', meta.nextflow )
-        }
-
-        // generate an unique class name
-        session.scriptClassName = generateClassName(scriptText)
-
-        // define the imports
-        def importCustomizer = new ImportCustomizer()
-        importCustomizer.addImports( StringUtils.name, groovy.transform.Field.name )
-        importCustomizer.addImports( Path.name )
-        importCustomizer.addImports( Channel.name )
-        importCustomizer.addImports( Duration.name )
-        importCustomizer.addImports( MemoryUnit.name )
-        importCustomizer.addStaticStars( Nextflow.name )
-
-        compilerConfig = new CompilerConfiguration()
-        compilerConfig.addCompilationCustomizers( importCustomizer )
-        compilerConfig.scriptBaseClass = BaseScript.class.name
-        compilerConfig.addCompilationCustomizers( new ASTTransformationCustomizer(NextflowDSL))
-        compilerConfig.addCompilationCustomizers( new ASTTransformationCustomizer(NextflowXform))
-
-        compilerConfig.setTargetDirectory(session.classesDir.toFile())
-        return this
+    protected void parseScript( ScriptFile scriptFile, String entryName ) {
+        scriptParser = new ScriptParser(session)
+                            .setEntryName(entryName)
+                            .parse(scriptFile.main)
+        session.script = scriptParser.script
     }
 
-    protected BaseScript parseScript( File file ) {
-        assert file
-        parseScript( file.text )
-    }
-
-    protected BaseScript parseScript( String scriptText ) {
-        log.debug "> Script parsing"
-
-        // extend the class-loader if required
-        def gcl = new GroovyClassLoader()
-        def libraries = ConfigHelper.resolveClassPaths( session.getLibDir() )
-
-        libraries?.each { Path lib -> def path = lib.complete()
-            log.debug "Adding to the classpath library: ${path}"
-            gcl.addClasspath(path.toString())
-        }
-
-        // set the script class-loader
-        session.classLoader = gcl
-
-        // run and wait for termination
-        BaseScript result
-        def groovy = new GroovyShell(gcl, session.binding, compilerConfig)
-        scriptObj = groovy.parse(scriptText, session.scriptClassName) as BaseScript
-    }
-
-    /**
-     * Creates a unique name for the main script class in order to avoid collision
-     * with the implicit and user variables
-     */
-    @PackageScope String generateClassName(String text) {
-        def hash = Hashing
-                .murmur3_32()
-                .newHasher()
-                .putUnencodedChars(text)
-                .hash()
-
-        return "_nf_script_${hash}"
-    }
-
-    /**
-     * Check preconditions before run the main script
-     */
-    protected void validate() {
-        checkConfig()
-        checkVersion()
-    }
-
-    @PackageScope void checkConfig() {
-        session.validateConfig(scriptObj.getProcessNames())
-    }
-
-    @PackageScope VersionNumber getCurrentVersion() {
-        new VersionNumber(Const.APP_VER)
-    }
-
-    @PackageScope void checkVersion() {
-        def version = session.manifest.getNextflowVersion()?.trim()
-        if( !version )
-            return
-
-        // when the version string is prefix with a `!`
-        // an exception is thrown is the version does not match
-        boolean important = false
-        if( version.startsWith('!') ) {
-            important = true
-            version = version.substring(1).trim()
-        }
-
-        if( !getCurrentVersion().matches(version) ) {
-            important ? showVersionError(version) : showVersionWarning(version)
-        }
-    }
-
-    @PackageScope void showVersionError(String ver) {
-        throw new AbortOperationException("Nextflow version $Const.APP_VER does not match workflow required version: $ver")
-    }
-
-    @PackageScope void showVersionWarning(String ver) {
-        log.warn "Nextflow version $Const.APP_VER does not match workflow required version: $ver -- Execution will continue, but things may break!"
-    }
 
     /**
      * Launch the Nextflow script execution
@@ -377,15 +213,18 @@ class ScriptRunner {
      */
     protected run() {
         log.debug "> Launching execution"
-        assert scriptObj, "Missing script instance to run"
+        assert scriptParser, "Missing script instance to run"
         // -- launch the script execution
-        output = scriptObj.run()
+        scriptParser.runScript()
+        // -- normalise output
+        result = normalizeOutput(scriptParser.getResult())
+        // -- ignite dataflow network
+        session.fireDataflowNetwork()
     }
 
     protected terminate() {
         log.debug "> Await termination "
         session.await()
-        normalizeOutput()
         session.destroy()
         session.cleanup()
         log.debug "> Execution complete -- Goodbye"
@@ -397,76 +236,19 @@ class ScriptRunner {
     void verifyAndTrackHistory(String cli, String name) {
         assert cli, 'Missing launch command line'
 
+        final ignore = System.getenv('NXF_IGNORE_RESUME_HISTORY') as Boolean
         // -- when resume, make sure the session id exists in the executions history
-        if( session.resumeMode && !HistoryFile.DEFAULT.checkExistsById(session.uniqueId.toString())) {
+        if( session.resumeMode && !ignore && !HistoryFile.DEFAULT.checkExistsById(session.uniqueId.toString()) ) {
             throw new AbortOperationException("Can't find a run with the specified id: ${session.uniqueId} -- Execution can't be resumed")
         }
 
-        commandLine = cli
         def revisionId = scriptFile.commitId ?: scriptFile.scriptId
-        HistoryFile.DEFAULT.write( name, session.uniqueId, revisionId, commandLine )
+        HistoryFile.DEFAULT.write( name, session.uniqueId, revisionId, cli )
     }
 
 
     @PackageScope
     ScriptFile getScriptFile() { scriptFile }
-
-    @PackageScope
-    String getCommandLine() { commandLine }
-
-    @PackageScope
-    @CompileDynamic
-    def fetchContainers() {
-
-        def result = [:]
-        if( session.config.process instanceof Map<String,?> ) {
-
-            /*
-             * look for `container` definition at process level
-             */
-            session.config.process.each { String name, value ->
-                if( name.startsWith('$') && value instanceof Map && value.container ) {
-                    result[name] = resolveClosure(value.container)
-                }
-            }
-
-            /*
-             * default container definition
-             */
-            def container = session.config.process.container
-            if( container ) {
-                if( result ) {
-                    result['default'] = resolveClosure(container)
-                }
-                else {
-                    result = resolveClosure(container)
-                }
-            }
-
-        }
-
-        return result
-    }
-
-    /**
-     * Resolve dynamically defined attributes to the actual value
-     *
-     * @param val A process container definition either a plain string or a closure
-     * @return The actual container value
-     */
-    protected String resolveClosure( val ) {
-        if( val instanceof Closure ) {
-            try {
-                return val.cloneWith(session.binding).call()
-            }
-            catch( Exception e ) {
-                log.debug "Unable to resolve dynamic `container` directive -- cause: ${e.message ?: e}"
-                return "(dynamic resolved)"
-            }
-        }
-
-        return String.valueOf(val)
-    }
 
     /**
      * Extends an {@code ArrayList} class adding a nicer index-out-of-range error message

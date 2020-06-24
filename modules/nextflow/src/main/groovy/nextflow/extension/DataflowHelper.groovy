@@ -16,9 +16,11 @@
 
 package nextflow.extension
 
+import groovy.transform.CompileStatic
 import groovy.transform.PackageScope
 import groovy.util.logging.Slf4j
 import groovyx.gpars.dataflow.Dataflow
+import groovyx.gpars.dataflow.DataflowChannel
 import groovyx.gpars.dataflow.DataflowQueue
 import groovyx.gpars.dataflow.DataflowReadChannel
 import groovyx.gpars.dataflow.DataflowVariable
@@ -44,6 +46,29 @@ class DataflowHelper {
     private static Session getSession() { Global.getSession() as Session }
 
     /**
+     * Create a dataflow object by the type of the specified source argument
+     *
+     * @param source
+     * @return
+     */
+    @Deprecated
+    static <V> DataflowChannel<V> newChannelBy(DataflowReadChannel<?> source) {
+
+        switch( source ) {
+            case DataflowExpression:
+                return new DataflowVariable<V>()
+
+            case DataflowQueue:
+                return new DataflowQueue<V>()
+
+            default:
+                throw new IllegalArgumentException()
+        }
+
+    }
+
+
+    /**
      * Check if a {@code DataflowProcessor} is active
      *
      * @param operator A {@code DataflowProcessor} instance
@@ -67,7 +92,7 @@ class DataflowHelper {
     static DEF_ERROR_LISTENER = new DataflowEventAdapter() {
         @Override
         boolean onException(final DataflowProcessor processor, final Throwable e) {
-            DataflowExtensions.log.error("@unknown", e)
+            OperatorEx.log.error("@unknown", e)
             session.abort(e)
             return true;
         }
@@ -88,7 +113,7 @@ class DataflowHelper {
 
             @Override
             boolean onException(final DataflowProcessor processor, final Throwable e) {
-                DataflowExtensions.log.error("@unknown", e)
+                DataflowHelper.log.error("@unknown", e)
                 session.abort(e)
                 return true
             }
@@ -219,7 +244,7 @@ class DataflowHelper {
      * @param closure
      * @return
      */
-    static final <V> DataflowProcessor subscribeImpl(final DataflowReadChannel<V> source, final Map<String,Closure> events ) {
+    static final DataflowProcessor subscribeImpl(final DataflowReadChannel source, final Map<String,Closure> events ) {
         checkSubscribeHandlers(events)
 
         def error = false
@@ -233,7 +258,7 @@ class DataflowHelper {
                     events.onComplete.call(processor)
                 }
                 catch( Exception e ) {
-                    DataflowExtensions.log.error("@unknown", e)
+                    OperatorEx.log.error("@unknown", e)
                     session.abort(e)
                 }
             }
@@ -269,13 +294,13 @@ class DataflowHelper {
     }
 
 
-    static <V> DataflowProcessor chainImpl(final DataflowReadChannel<?> source, final DataflowReadChannel<V> target, final Map params, final Closure<V> closure) {
+    static DataflowProcessor chainImpl(final DataflowReadChannel source, final DataflowWriteChannel target, final Map params, final Closure closure) {
 
         final Map<String, Object> parameters = new HashMap<String, Object>(params)
         parameters.put("inputs", asList(source))
         parameters.put("outputs", asList(target))
 
-        newOperator(parameters, new ChainWithClosure<V>(closure))
+        newOperator(parameters, new ChainWithClosure(closure))
     }
 
     /**
@@ -286,7 +311,7 @@ class DataflowHelper {
      * @param closure
      * @return
      */
-    static <V> DataflowProcessor reduceImpl(final DataflowReadChannel<?> channel, final DataflowVariable result, def seed, final Closure<V> closure) {
+    static DataflowProcessor reduceImpl(final DataflowReadChannel channel, final DataflowVariable result, def seed, final Closure closure) {
 
         // the *accumulator* value
         def accum = seed
@@ -296,7 +321,7 @@ class DataflowHelper {
             /*
              * call the passed closure each time
              */
-            public void afterRun(final DataflowProcessor processor, final List<Object> messages) {
+            void afterRun(final DataflowProcessor processor, final List<Object> messages) {
                 final item = messages.get(0)
                 final value = accum == null ? item : closure.call(accum, item)
 
@@ -314,23 +339,23 @@ class DataflowHelper {
             /*
              * when terminates bind the result value
              */
-            public void afterStop(final DataflowProcessor processor) {
+            void afterStop(final DataflowProcessor processor) {
                 result.bind(accum)
             }
 
-            public boolean onException(final DataflowProcessor processor, final Throwable e) {
+            boolean onException(final DataflowProcessor processor, final Throwable e) {
                 log.error("@unknown", e)
                 session.abort(e)
                 return true;
             }
         }
 
-        chainImpl(channel, new DataflowQueue(), [listeners: [listener]], {true})
+        chainImpl(channel, CH.create(), [listeners: [listener]], {true})
     }
 
-
     @PackageScope
-    static KeyPair split(List<Integer> pivot, entry) {
+    @CompileStatic
+    static KeyPair makeKey(List<Integer> pivot, entry) {
         final result = new KeyPair()
 
         if( !(entry instanceof List) ) {
@@ -347,15 +372,16 @@ class DataflowHelper {
 
         for( int i=0; i<list.size(); i++ ) {
             if( i in pivot )
-                result.keys << list[i]
+                result.addKey(list[i])
             else
-                result.values << list[i]
+                result.addValue(list[i])
         }
 
         return result
     }
 
     @PackageScope
+    @CompileStatic
     static void addToList(List result, entry)  {
         if( entry instanceof List ) {
             result.addAll(entry)
@@ -365,4 +391,11 @@ class DataflowHelper {
         }
     }
 
+    @CompileStatic
+    static Map<String,Closure> eventsMap(Closure onNext, Closure onComplete) {
+        def result = new HashMap<String,Closure>(2)
+        result.put('onNext', onNext)
+        result.put('onComplete', onComplete)
+        return result
+    }
 }

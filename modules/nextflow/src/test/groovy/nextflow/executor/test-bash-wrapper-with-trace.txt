@@ -133,20 +133,27 @@ nxf_trace_mac() {
     nxf_write_trace
 }
 
+nxf_fd() {
+    local FD=11
+    while [ -e /proc/$$/fd/$FD ]; do FD=$((FD+1)); done
+    echo $FD
+}
+
 nxf_trace_linux() {
     local pid=$$
+    command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to collect task metrics cannot be found"; exit 1; }
     local num_cpus=$(< /proc/cpuinfo grep '^processor' -c)
     local tot_time0=$(grep '^cpu ' /proc/stat | awk '{sum=$2+$3+$4+$5+$6+$7+$8+$9; printf "%.0f",sum}')
     local cpu_time0=$(2> /dev/null < /proc/$pid/stat awk '{printf "%.0f", ($16+$17)*10 }' || echo -n 'X')
     local io_stat0=($(2> /dev/null < /proc/$pid/io sed 's/^.*:\s*//' | head -n 6 | tr '\n' ' ' || echo -n '0 0 0 0 0 0'))
     local start_millis=$(nxf_date)
-
-    command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to collect task metrics cannot be found"; exit 1; }
-
+    trap 'kill $mem_proc' ERR
+    
     /bin/bash -ue {{folder}}/.command.sh &
     local task=$!
 
-    exec 10> >(nxf_mem_watch $task)
+    mem_fd=$(nxf_fd)
+    eval "exec $mem_fd> >(nxf_mem_watch $task)"
     local mem_proc=$!
 
     wait $task
@@ -175,7 +182,7 @@ nxf_trace_linux() {
     echo "read_bytes=${io_stat1[4]}"   >> $trace_file
     echo "write_bytes=${io_stat1[5]}"  >> $trace_file
 
-    echo 'DONE' >&10
+    [ -e /proc/$mem_proc ] && eval "echo 'DONE' >&$mem_fd" || true
     wait $mem_proc 2>/dev/null || true
     while [ -e /proc/$mem_proc ]; do nxf_sleep 0.1; done
 }
@@ -191,7 +198,13 @@ nxf_trace() {
 }
 
 nxf_date() {
-    local ts=$(date +%s%3N); [[ $ts == *3N ]] && date +%s000 || echo $ts
+    local ts=$(date +%s%3N);
+    if [[ ${#ts} == 10 ]]; then echo ${ts}000
+    elif [[ $ts == *%3N ]]; then echo ${ts/\%3N/000}
+    elif [[ $ts == *3N ]]; then echo ${ts/3N/000}
+    elif [[ ${#ts} == 13 ]]; then echo $ts
+    else echo "Unexpected timestamp value: $ts"; exit 1
+    fi
 }
 
 nxf_env() {
@@ -253,6 +266,7 @@ nxf_main() {
     trap on_exit EXIT
     trap on_term TERM INT USR1 USR2
 
+    [[ "${NXF_CHDIR:-}" ]] && cd "$NXF_CHDIR"
     NXF_SCRATCH=''
     [[ $NXF_DEBUG > 0 ]] && nxf_env
     touch {{folder}}/.command.begin

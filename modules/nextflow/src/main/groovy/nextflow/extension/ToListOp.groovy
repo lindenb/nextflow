@@ -22,7 +22,7 @@ import groovyx.gpars.dataflow.DataflowVariable
 import groovyx.gpars.dataflow.expression.DataflowExpression
 
 /**
- * Implements {@link DataflowExtensions#toList(groovyx.gpars.dataflow.DataflowReadChannel)}  operator
+ * Implements {@link OperatorEx#toList(groovyx.gpars.dataflow.DataflowReadChannel)}  operator
  *
  * @author Paolo Di Tommaso <paolo.ditommaso@gmail.com>
  */
@@ -67,6 +67,7 @@ class ToListOp {
         }
     }
 
+    @Deprecated
     static DataflowVariable apply( DataflowReadChannel source ) {
         new ToListOp(source).apply()
     }

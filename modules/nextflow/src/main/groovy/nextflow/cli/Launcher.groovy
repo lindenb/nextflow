@@ -16,11 +16,8 @@
 
 package nextflow.cli
 
-import nextflow.util.Escape
-import static nextflow.Const.APP_BUILDNUM
-import static nextflow.Const.APP_NAME
-import static nextflow.Const.APP_VER
-import static nextflow.Const.SPLASH
+import nextflow.util.SpuriousDeps
+import static nextflow.Const.*
 
 import java.lang.reflect.Field
 
@@ -36,12 +33,10 @@ import groovy.util.logging.Slf4j
 import nextflow.exception.AbortOperationException
 import nextflow.exception.AbortRunException
 import nextflow.exception.ConfigParseException
-import nextflow.trace.GraphObserver
-import nextflow.trace.ReportObserver
-import nextflow.trace.TimelineObserver
-import nextflow.trace.TraceFileObserver
+import nextflow.exception.ScriptCompilationException
+import nextflow.exception.ScriptRuntimeException
+import nextflow.util.Escape
 import nextflow.util.LoggerHelper
-import org.codehaus.groovy.control.CompilationFailedException
 import org.eclipse.jgit.api.errors.GitAPIException
 /**
  * Main application entry point. It parses the command line and
@@ -90,7 +85,7 @@ class Launcher {
         allCommands = (List<CmdBase>)[
                 new CmdClean(),
                 new CmdClone(),
-                new CmdCloud(),
+                new CmdConsole(),
                 new CmdFs(),
                 new CmdHistory(),
                 new CmdInfo(),
@@ -107,6 +102,11 @@ class Launcher {
                 new CmdHelp(),
                 new CmdSelfUpdate()
         ]
+
+        // legacy command
+        final cmdCloud = SpuriousDeps.cmdCloud()
+        if( cmdCloud )
+            allCommands.add(cmdCloud)
 
         options = new CliOptions()
         jcommander = new JCommander(options)
@@ -162,9 +162,9 @@ class Launcher {
     private void checkLogFileName() {
         if( !options.logFile ) {
             if( isDaemon() )
-                options.logFile = '.node-nextflow.log'
+                options.logFile = System.getenv('NXF_LOG_FILE') ?: '.node-nextflow.log'
             else if( command instanceof CmdRun || options.debug || options.trace )
-                options.logFile = ".nextflow.log"
+                options.logFile = System.getenv('NXF_LOG_FILE') ?: ".nextflow.log"
         }
     }
 
@@ -222,22 +222,26 @@ class Launcher {
             }
 
             else if( current == '-with-trace' && (i==args.size() || args[i].startsWith('-'))) {
-                normalized << TraceFileObserver.DEF_FILE_NAME
+                normalized << '-'
             }
 
             else if( current == '-with-report' && (i==args.size() || args[i].startsWith('-'))) {
-                normalized << ReportObserver.DEF_FILE_NAME
+                normalized << '-'
             }
 
             else if( current == '-with-timeline' && (i==args.size() || args[i].startsWith('-'))) {
-                normalized << TimelineObserver.DEF_FILE_NAME
+                normalized << '-'
             }
 
             else if( current == '-with-dag' && (i==args.size() || args[i].startsWith('-'))) {
-                normalized << GraphObserver.DEF_FILE_NAME
+                normalized << '-'
             }
 
             else if( current == '-with-docker' && (i==args.size() || args[i].startsWith('-'))) {
+                normalized << '-'
+            }
+
+            else if( current == '-with-podman' && (i==args.size() || args[i].startsWith('-'))) {
                 normalized << '-'
             }
 
@@ -246,6 +250,10 @@ class Launcher {
             }
 
             else if( current == '-with-weblog' && (i==args.size() || args[i].startsWith('-'))) {
+                normalized << '-'
+            }
+
+            else if( current == '-with-tower' && (i==args.size() || args[i].startsWith('-'))) {
                 normalized << '-'
             }
 
@@ -258,6 +266,10 @@ class Launcher {
             }
 
             else if( (current == '-K' || current == '-with-k8s') && (i==args.size() || args[i].startsWith('-'))) {
+                normalized << 'true'
+            }
+
+            else if( (current == '-dsl2') && (i==args.size() || args[i].startsWith('-'))) {
                 normalized << 'true'
             }
 
@@ -397,6 +409,10 @@ class Launcher {
             System.exit(1)
 
         }
+        catch ( AbortOperationException e ) {
+            System.err.println (e.message ?: "Unknown abort reason")
+            System.exit(1)
+        }
         catch( Throwable e ) {
             e.printStackTrace(System.err)
             System.exit(1)
@@ -481,8 +497,13 @@ class Launcher {
             return(1)
         }
 
-        catch( CompilationFailedException e ) {
+        catch( ScriptCompilationException e ) {
             log.error e.message
+            return(1)
+        }
+
+        catch ( ScriptRuntimeException | IllegalArgumentException e) {
+            log.error(e.message, e)
             return(1)
         }
 
@@ -623,7 +644,7 @@ class Launcher {
      *
      * @param args The program options as specified by the user on the CLI
      */
-    public static void main(String... args)  {
+    static void main(String... args)  {
 
         final launcher = DripMain.LAUNCHER ?: new Launcher()
         final status = launcher .command(args) .run()

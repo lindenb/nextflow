@@ -15,6 +15,9 @@
  */
 
 package nextflow.file
+
+import spock.lang.Unroll
+
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.FileSystem
 import java.nio.file.Files
@@ -463,6 +466,33 @@ class FileHelperTest extends Specification {
         folder?.deleteDir()
     }
 
+    def 'visit files 3' () {
+        given:
+        def folder = Files.createTempDirectory('test')
+        and:
+        folder.resolve('file1.txt').text = 'file 1'
+        folder.resolve('file2.fa').text = 'file 2'
+        folder.resolve('file3.bam').text = 'file 2'
+        Files.createSymbolicLink(
+                folder.resolve('file4.fa'),
+                folder.resolve('file3.bam'))
+
+        when:
+        def result = []
+        FileHelper.visitFiles(folder, '*.fa', relative: true) { result << it.toString() }
+        then:
+        result.sort() == ['file2.fa','file4.fa']
+
+        when:
+        result = []
+        FileHelper.visitFiles(folder, '*.fa', relative: true, followLinks: false) { result << it.toString() }
+        then:
+        result.sort() == ['file2.fa']
+
+        cleanup:
+        folder?.deleteDir()
+    }
+
     def 'visit files in a base path with glob characters' () {
         given:
         def folder = Files.createTempDirectory('test[a-b]')
@@ -902,6 +932,33 @@ class FileHelperTest extends Specification {
          'https'    |  false
          'ftp'      |  false
          'ftps'     |  false
+    }
+
+    @Unroll
+    def 'should return an identifier given file #PATH'() {
+
+        expect:
+        FileHelper.getIdentifier(Paths.get(PATH)) == EXPECTED
+
+        where:
+        PATH                | EXPECTED
+        'foo/bar.nf.txt'    | 'bar'
+        'foo-bar-baz.nf'    | 'foo_bar_baz'
+        '123-fo0'           | '_23_fo0'
+        '--a  b  c'         | '_a_b_c'
+    }
+
+    @Unroll
+    def 'should get url protocol' () {
+        expect:
+        FileHelper.getUrlProtocol(STR)  == EXPECTED
+        where:
+        EXPECTED    | STR
+        'ftp'       | 'ftp://abc.com'
+        's3'        | 's3://bucket/abc'
+        null        | '3s://bucket/abc'
+        null        | 'abc:xyz'
+        null        | '/a/bc/'
     }
 
 }
