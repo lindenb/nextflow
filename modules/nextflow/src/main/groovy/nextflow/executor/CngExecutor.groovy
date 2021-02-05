@@ -146,6 +146,9 @@ class CngExecutor extends SlurmExecutor {
    	else if(s.equals("FAILED")) {
    		return QueueStatus.ERROR;
    		}
+   	else if(s.equals("NODE_FAIL")) {
+   		return QueueStatus.ERROR;
+   		}
    	else if(s.equals("PENDING")) {
    		return QueueStatus.PENDING;
    		}
